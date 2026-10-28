@@ -1,24 +1,31 @@
 # Felisidian
 
-A visual library for your Obsidian vault. Browse your notes as colored cards, grouped by category, with tags, authors, page counts and reading progress.
+A visual library for your Obsidian vault: follow what you are reading and what you are thinking from it, as pastel cards grouped by subject.
 
-> **Status:** early development (0.1.0). The library view and the read-only reader work; see the roadmap in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+> **Status:** early development (0.1.0). See the roadmap in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## Features
 
-- **Library view** with Items / Notebooks / Canvases tabs, breadcrumb navigation and category descriptions.
-- **Reading mode** (route: library > category > note): the page is read-only. Nothing changes unless you highlight, update the page counter or click *Edit note*.
-- **Highlighting**: select text and click *Highlight*. It is stored as standard `==text==` in the note. Click a highlight to remove it.
+A library to follow what you are **reading** and what you are **thinking** from it.
 
-## Planned features
+- **Content types**, each with its own card: sources (book, article, video…), reading notes, ideas and quick captures.
+- **Views** in the sidebar (Library, Reading now, Captures, Ideas, Recent) and a tree of subjects with colors and counts. Views are filters over the same notes, not folders.
+- **Compact filters**: Type, Reading status, Authors and More filters (subject, format, linked source, elaboration, connections). Combine them freely; active filters show as removable chips with the result count.
+- **Reading page** for every note, with a Back button that restores filters and scroll. Select a passage to highlight it or turn it into a **reading note** that keeps its source and location; passage and your own words are drawn as separate blocks.
+- **Develop idea** opens a window with the origin note and a simple way to link other notes. Nothing is written for you.
+- Pastel cards and notes tinted by subject color, drag to reorder cards, animated filtering, Portuguese and English, light and dark themes.
 
-- Library view with a category tree: a colored circle and item count per category, with subcategories.
-- Preview cards showing year, category, title, authors, notes count and a circular reading-progress ring.
-- Tags and authors as filterable chips.
-- Sorting (recent, title, year, progress) and search.
-- Everything driven by note properties (frontmatter), so your data stays in plain Markdown.
+See [docs/PROPERTIES.md](docs/PROPERTIES.md) for the properties each type uses.
 
-See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for the full requirements and roadmap; the visual reference is kept locally and not redistributed.
+![Library](assets/images/screenshots/library-overview.jpg)
+![Source page](assets/images/screenshots/source-page.jpg)
+![Reading note](assets/images/screenshots/reading-note.jpg)
+
+## Not yet
+
+- Covers and metadata lookup (ISBN, DOI) and PDF/EPUB reading: out of scope for now.
+- A Bases view and several highlight colors.
+- Validation on mobile.
 
 ## Development
 

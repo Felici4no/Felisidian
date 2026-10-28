@@ -2,6 +2,7 @@ import {
   ItemView,
   Keymap,
   Menu,
+  Platform,
   ViewStateResult,
   WorkspaceLeaf,
   debounce,
@@ -263,6 +264,8 @@ export class LibraryView extends ItemView implements NavPage {
   }
 
   private afterNavigation() {
+    // On a narrow screen the sidebar is a drawer: choosing something closes it.
+    this.contentEl.removeClass("is-side-open");
     this.persist();
     this.renderSide();
     this.renderMain(false);
@@ -380,6 +383,7 @@ export class LibraryView extends ItemView implements NavPage {
     this.chipsEl = null;
     this.countEl = null;
 
+    this.renderSideToggle(main);
     this.renderBreadcrumb(main);
 
     main.createDiv({ cls: "fel-head" }).createEl("h1", { text: this.title() });
@@ -403,6 +407,23 @@ export class LibraryView extends ItemView implements NavPage {
     if (keepScroll) main.scrollTop = scroll;
   }
 
+  /** Narrow screens only (CSS): opens and closes the sidebar drawer. */
+  private renderSideToggle(parent: HTMLElement) {
+    const open = this.contentEl.hasClass("is-side-open");
+    const btn = parent.createEl("button", {
+      cls: "fel-side-toggle",
+      attr: { "aria-expanded": String(open), "aria-label": t("side.menu") },
+    });
+    setIcon(btn.createSpan(), "panel-left");
+    btn.createSpan({ text: t("side.menu") });
+    btn.addEventListener("click", () => {
+      const next = !this.contentEl.hasClass("is-side-open");
+      this.contentEl.toggleClass("is-side-open", next);
+      btn.setAttr("aria-expanded", String(next));
+      if (next) requestAnimationFrame(() => this.moveIndicator());
+    });
+  }
+
   private renderBreadcrumb(parent: HTMLElement) {
     const bc = parent.createDiv({ cls: "fel-crumbs" });
     const root = bc.createSpan({
@@ -419,6 +440,17 @@ export class LibraryView extends ItemView implements NavPage {
         bc.createSpan({ cls: "fel-crumb is-current", text: t(`view.${this.state.view}`) });
       }
       return;
+    }
+
+    // Inside a view (Ideas, Captures…) the trail keeps the view before the subject.
+    if (this.state.view !== "library") {
+      bc.createSpan({ cls: "fel-crumb-sep", text: "/" });
+      const viewCrumb = bc.createSpan({
+        cls: "fel-crumb",
+        text: t(`view.${this.state.view}`),
+        attr: { role: "button", tabindex: "0" },
+      });
+      this.onActivate(viewCrumb, () => this.selectView(this.state.view));
     }
 
     const segs = subject.split("/");
@@ -940,7 +972,8 @@ export class LibraryView extends ItemView implements NavPage {
   private createCard(path: string): HTMLElement {
     const el = createDiv({ cls: "fel-card" });
     el.dataset.path = path;
-    el.draggable = true;
+    // HTML5 drag and drop does not work by touch.
+    el.draggable = !Platform.isMobile;
     el.setAttr("role", "button");
     el.setAttr("tabindex", "0");
 

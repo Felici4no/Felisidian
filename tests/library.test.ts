@@ -227,6 +227,11 @@ test("extractPreview keeps only the user's own words", () => {
   assert.equal(extractPreview("> só citação"), "");
 });
 
+test("the preview stops before the list of connections", () => {
+  const body = ["---", "type: idea", "---", "", "Meu argumento aqui.", "", "## Conexões", "", "- Nasceu de: [[Outra nota]]", "- [[Mais uma]]"].join("\n");
+  assert.equal(extractPreview(body), "Meu argumento aqui.");
+});
+
 test("splitNoteBody separates the quote from the user's text, in order", () => {
   const body = "> [!quote]\n> trecho\n\n## Com minhas palavras\n\nminha parte";
   const parts = splitNoteBody(body);
@@ -254,6 +259,25 @@ test("reading note keeps the source link and location, and writes nothing for th
   assert.match(md, /## Com minhas palavras\n\n\n$/);
   const parts = splitNoteBody(md.slice(md.indexOf("> [!quote]")));
   assert.equal(parts[0].kind, "quote");
+});
+
+test("a reading note has no elaboration unless the user sets one", () => {
+  const base = { quote: "t", ownHeading: "Com minhas palavras", own: "escrevi algo", date: new Date() };
+  assert.doesNotMatch(buildReadingNote(base), /elaboration/);
+  assert.match(buildReadingNote({ ...base, elaboration: "developing" }), /elaboration: developing/);
+});
+
+test("filters added on top of a view count, so they can be cleared", () => {
+  const ideas = presetFilters("ideas");
+  const withSubject = { ...ideas, categories: ["Aprendizagem"] };
+  assert.equal(additionalCount(withSubject, "ideas"), 1);
+  // Clearing keeps the view (type idea) and drops only the subject.
+  const cleared = enforceView(emptyFilters(), "ideas");
+  assert.deepEqual(cleared.types, ["idea"]);
+  assert.deepEqual(cleared.categories, []);
+  assert.equal(additionalCount(cleared, "ideas"), 0);
+  // The sample idea has no subject, so the subject filter leaves nothing.
+  assert.equal(applyFilters(all, withSubject).length, 0);
 });
 
 test("reading note without source or location has no empty fields", () => {

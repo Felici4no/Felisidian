@@ -3,6 +3,7 @@ import {
   MarkdownRenderer,
   Menu,
   Notice,
+  Platform,
   TFile,
   ViewStateResult,
   WorkspaceLeaf,
@@ -34,6 +35,7 @@ export class ReaderView extends ItemView implements NavPage {
   private title = "";
   private bodyEl: HTMLElement | null = null;
   private toolbar: HTMLElement | null = null;
+  private lastSelection = "";
   private items: LibraryItem[] = [];
   private current: LibraryItem | undefined;
 
@@ -84,6 +86,28 @@ export class ReaderView extends ItemView implements NavPage {
     this.registerEvent(this.app.vault.on("modify", () => rerender()));
     this.registerEvent(this.app.metadataCache.on("changed", () => rerender()));
     this.registerEvent(this.app.vault.on("create", () => rerender()));
+
+    // Touch selection fires no mouseup; the selection itself is the signal.
+    this.registerDomEvent(
+      document,
+      "selectionchange",
+      debounce(() => this.onSelect(), 250, true)
+    );
+
+    // Scrolling moves the selection: put the toolbar back next to it (or hide it).
+    this.registerDomEvent(
+      this.contentEl,
+      "scroll",
+      debounce(
+        () => {
+          this.hideToolbar();
+          this.lastSelection = "";
+          this.onSelect();
+        },
+        120,
+        true
+      )
+    );
 
     this.registerDomEvent(document, "mousedown", (evt) => {
       if (this.toolbar && !this.toolbar.contains(evt.target as Node)) this.hideToolbar();
@@ -142,6 +166,7 @@ export class ReaderView extends ItemView implements NavPage {
     this.bodyEl = bodyEl;
 
     bodyEl.addEventListener("mouseup", () => this.onSelect());
+    bodyEl.addEventListener("touchend", () => window.setTimeout(() => this.onSelect(), 50));
     bodyEl.addEventListener("click", (evt) => {
       const target = evt.target as HTMLElement;
       const mark = target.closest("mark");
@@ -277,8 +302,8 @@ export class ReaderView extends ItemView implements NavPage {
       "elaboration",
       t("f.elab"),
       ELABORATIONS.map((e) => [e, t(`elab.${e}`)]),
-      item.elaboration ?? (item.kind === "idea" ? "" : "pending"),
-      item.kind === "idea"
+      item.elaboration ?? (item.kind === "capture" ? "pending" : ""),
+      item.kind !== "capture"
     );
   }
 
@@ -452,6 +477,7 @@ export class ReaderView extends ItemView implements NavPage {
   private hideToolbar() {
     this.toolbar?.remove();
     this.toolbar = null;
+    this.lastSelection = "";
   }
 
   private onSelect() {
@@ -463,11 +489,21 @@ export class ReaderView extends ItemView implements NavPage {
     const range = sel.getRangeAt(0);
     if (!this.bodyEl.contains(range.commonAncestorContainer)) return;
 
+    // Same selection, toolbar already there: nothing to redraw.
+    const text = sel.toString();
+    if (this.toolbar && text === this.lastSelection) return;
+    this.lastSelection = text;
+
     this.hideToolbar();
     const rect = range.getBoundingClientRect();
+    // A selection scrolled out of view gets no toolbar.
+    if (rect.bottom < 0 || rect.top > window.innerHeight) return;
     const bar = document.body.createDiv({ cls: "fel-toolbar", attr: { role: "toolbar" } });
-    bar.style.left = `${rect.left + rect.width / 2}px`;
-    bar.style.top = `${rect.top - 8}px`;
+    // On touch screens the system menu sits above the selection, so ours goes below.
+    const below = Platform.isMobile;
+    bar.toggleClass("is-below", below);
+    bar.style.top = below ? `${rect.bottom + 14}px` : `${rect.top - 8}px`;
+    const centre = rect.left + rect.width / 2;
 
     const hl = bar.createEl("button", { cls: "fel-btn" });
     setIcon(hl.createSpan(), "highlighter");
@@ -486,6 +522,15 @@ export class ReaderView extends ItemView implements NavPage {
       this.hideToolbar();
       window.getSelection()?.removeAllRanges();
     });
+    // Keep the toolbar inside the screen.
+    const half = bar.offsetWidth / 2;
+    bar.style.left = `${Math.max(8 + half, Math.min(centre, window.innerWidth - 8 - half))}px`;
+    // Obsidian mobile floats a navigation bar at the bottom: if there is no room
+    // under the selection, put the toolbar above it instead.
+    if (below && rect.bottom + 14 + bar.offsetHeight > window.innerHeight - 96) {
+      bar.removeClass("is-below");
+      bar.style.top = `${Math.max(8, rect.top - 14)}px`;
+    }
     this.toolbar = bar;
   }
 

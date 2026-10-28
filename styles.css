@@ -1893,3 +1893,269 @@ details.fel-origin {
   padding-bottom: 20px;
   background: var(--fel-paper);
 }
+
+/* ===== v4: phones and touch ===== */
+
+.fel-side-toggle {
+  display: none;
+}
+
+.fel-toolbar.is-below {
+  transform: translate(-50%, 0);
+}
+
+/* ---- Narrow screens: the sidebar becomes a drawer ---- */
+@media (max-width: 700px) {
+  .fel-lib {
+    flex-direction: column;
+  }
+
+  .fel-side {
+    display: none;
+    flex: 0 0 auto;
+    max-height: 55vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--fel-line);
+  }
+
+  .fel-lib.is-side-open .fel-side {
+    display: block;
+  }
+
+  .fel-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 12px 14px 32px;
+  }
+
+  .fel-side-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    margin-bottom: 10px;
+    padding: 8px 16px;
+    border: 1px solid var(--fel-line);
+    border-radius: 999px;
+    background: var(--fel-paper-2);
+    color: var(--fel-ink);
+    box-shadow: none;
+  }
+
+  .fel-side-toggle .svg-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .fel-head h1 {
+    font-size: 2em;
+  }
+
+  .fel-tabs {
+    overflow-x: auto;
+  }
+
+  .fel-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .fel-card.fel-card-source,
+  .fel-card.fel-card-reading-note,
+  .fel-card.fel-card-idea {
+    min-height: 0;
+  }
+
+  .fel-filterbar {
+    width: 100%;
+  }
+
+  .fel-filter-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* Filter menus use the full width instead of floating next to a small button. */
+  .fel-popover {
+    left: 8px !important;
+    right: 8px;
+    width: auto;
+    max-width: none;
+  }
+
+  .fel-reader-page {
+    padding: 14px 14px 56px;
+  }
+
+  .fel-reader-head h1 {
+    font-size: 1.8em;
+  }
+
+  .fel-reader-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .fel-reader-actions .fel-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .fel-quote-block,
+  .fel-own-block {
+    padding: 14px 16px;
+  }
+
+  .fel-mini-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Writing windows: nearly full width, room for the keyboard. */
+  .modal.fel-modal,
+  .modal.fel-modal.is-wide {
+    width: 96vw;
+    max-height: 94vh;
+    max-height: 94dvh;
+    padding: 18px 14px 14px;
+  }
+
+  .fel-modal .fel-title-input {
+    font-size: 1.25em;
+  }
+
+  .fel-modal .fel-write-lg {
+    min-height: 150px;
+  }
+
+  .fel-modal .fel-write {
+    min-height: 110px;
+  }
+
+  .fel-modal-foot {
+    gap: 8px;
+  }
+
+  .fel-modal-foot button {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+}
+
+/* ---- Touch: comfortable targets, no hover-only cues ---- */
+@media (pointer: coarse), (max-width: 700px) {
+  .fel-filter-btn,
+  .fel-btn,
+  .fel-tab,
+  .fel-clear,
+  .fel-back,
+  .fel-select-wrap select {
+    min-height: 44px;
+  }
+
+  .fel-side-link,
+  .fel-pop-row,
+  .fel-linkresult,
+  .fel-row {
+    min-height: 44px;
+  }
+
+  .fel-chip-x {
+    width: 32px;
+    height: 32px;
+  }
+
+  .fel-swatch {
+    width: 32px;
+    height: 32px;
+  }
+
+  .fel-swatches.is-small .fel-swatch {
+    width: 28px;
+    height: 28px;
+  }
+
+  .fel-kbd-hint {
+    display: none;
+  }
+
+  .fel-card:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* ---- v4 fixes: toolbar width and Obsidian's floating mobile bar ---- */
+@media (max-width: 700px) {
+  .fel-tools-end {
+    flex-wrap: wrap;
+  }
+
+  .fel-tools-end .fel-search {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .fel-tools-end .fel-sort {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+/* The floating navigation bar of Obsidian mobile must not cover the end of a page. */
+body.is-mobile .fel-main,
+body.is-mobile .fel-reader-page {
+  padding-bottom: 120px;
+}
+
+/* ---- v4 fixes: origin label, inline selects, short screens (keyboard open) ---- */
+.fel-origin-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.fel-modal .fel-field-inline select,
+.fel-modal .fel-field-inline .dropdown {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* With the virtual keyboard open there is little height: give it to the writing. */
+@media (max-width: 700px) and (max-height: 560px) {
+  .fel-modal .modal-title {
+    display: none;
+  }
+
+  .fel-modal .fel-write-lg {
+    min-height: 90px;
+  }
+
+  details.fel-origin {
+    margin-bottom: 10px;
+    padding: 4px 12px;
+  }
+
+  .fel-field {
+    margin-bottom: 10px;
+  }
+}
+
+/* ---- v4 fix: nothing in a window may be wider than the window ---- */
+.modal.fel-modal {
+  overflow-x: hidden;
+}
+
+.fel-modal input,
+.fel-modal select,
+.fel-modal textarea {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+/* ---- v4 fix: the selection toolbar keeps its buttons in one row ---- */
+.fel-toolbar {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+}

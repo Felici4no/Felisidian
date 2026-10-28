@@ -33,6 +33,7 @@ const S = {
   "side.subjects": ["Subjects", "Assuntos"],
   "side.newTag": ["New tag +", "Nova tag +"],
   "side.views": ["Views", "Visões"],
+  "side.menu": ["Views and subjects", "Visões e assuntos"],
   // library
   "lib.root": ["My library", "Minha biblioteca"],
   "tab.items": ["Items", "Itens"],

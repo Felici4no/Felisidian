@@ -349,6 +349,7 @@ export class ReadingNoteModal extends Modal {
   private quote: string;
   private own = "";
   private title = "";
+  private elaboration: Elaboration | "" = "";
 
   constructor(
     app: App,
@@ -417,6 +418,12 @@ export class ReadingNoteModal extends Modal {
     });
     titleInput.addEventListener("input", () => (this.title = titleInput.value));
 
+    const elab = field(contentEl, t("modal.elabOptional"), "fel-field-inline");
+    const elabSelect = elab.wrap.createEl("select", { cls: "dropdown", attr: { id: elab.id } });
+    elabSelect.createEl("option", { value: "", text: t("modal.notSet") });
+    ELABORATIONS.forEach((e) => elabSelect.createEl("option", { value: e, text: t(`elab.${e}`) }));
+    elabSelect.addEventListener("change", () => (this.elaboration = elabSelect.value as Elaboration | ""));
+
     footer(contentEl, this, t("modal.createReadingNote"), () => this.submit());
     submitOnModEnter(this, () => this.submit());
   }
@@ -439,7 +446,8 @@ export class ReadingNoteModal extends Modal {
       own: this.own,
       title: this.title.trim() || undefined,
       ownHeading: t("modal.ownWords"),
-      elaboration: this.own.trim() ? "developing" : "pending",
+      // Only what the user chose: text or no text does not set a state.
+      elaboration: this.elaboration || undefined,
       date: now,
     });
     const name =

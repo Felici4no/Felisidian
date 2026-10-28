@@ -121,10 +121,11 @@ export function collectItems(app: App, previews: PreviewCache = new Map()): Libr
       color: typeof fm.color === "string" ? fm.color : undefined,
       format: kind === "source" ? asFormat(fm.format) : undefined,
       status: kind === "source" ? deriveStatus(fm.status, progress) : undefined,
-      // Captures and reading notes start as pending. Ideas have no state unless
-      // the user sets one, so a new idea is not treated as unfinished work.
+      // Only captures start as pending: that is their purpose. Reading notes and
+      // ideas have no state unless the user sets one; having text or being empty
+      // does not turn them into a to-do.
       elaboration: isNote
-        ? asEnum<Elaboration>(fm.elaboration, ELABORATIONS) ?? (kind === "idea" ? undefined : "pending")
+        ? asEnum<Elaboration>(fm.elaboration, ELABORATIONS) ?? (kind === "capture" ? "pending" : undefined)
         : undefined,
       sourcePath: sourcePaths[0],
       location: typeof fm.location === "string" && fm.location ? fm.location : undefined,

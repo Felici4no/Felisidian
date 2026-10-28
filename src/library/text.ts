@@ -31,9 +31,13 @@ export function truncate(text: string, max: number): string {
  * The user's own writing, shortened: quotes, headings, code and markup are
  * dropped so only the text they wrote remains.
  */
+/** Sections that only list links; they are not the user's argument. */
+const LINK_SECTION = /^#{1,6}\s+(conexões|connections)\s*$/im;
+
 export function extractPreview(body: string, max = 200): string {
-  const text = body
-    .slice(frontmatterLength(body))
+  const own = body.slice(frontmatterLength(body));
+  const cut = own.search(LINK_SECTION);
+  const text = (cut >= 0 ? own.slice(0, cut) : own)
     .replace(/```[\s\S]*?```/g, " ")
     .split(/\r?\n/)
     .filter((line) => {
@@ -102,7 +106,8 @@ export interface ReadingNoteInput {
   own?: string;
   title?: string;
   ownHeading: string;
-  elaboration: Elaboration;
+  /** Optional: only what the user chose. */
+  elaboration?: Elaboration;
   date: Date;
 }
 
@@ -112,7 +117,8 @@ export function buildReadingNote(input: ReadingNoteInput): string {
   if (input.title) fm.push(`title: ${q(input.title)}`);
   if (input.source) fm.push(`source: ${q(`[[${input.source}]]`)}`);
   if (input.location) fm.push(`location: ${q(input.location)}`);
-  fm.push(`elaboration: ${input.elaboration}`, `created: ${isoDate(input.date)}`, "---", "");
+  if (input.elaboration) fm.push(`elaboration: ${input.elaboration}`);
+  fm.push(`created: ${isoDate(input.date)}`, "---", "");
 
   const out = [...fm];
   const quote = input.quote.trim();

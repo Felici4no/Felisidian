@@ -1,46 +1,71 @@
 import {
   ItemView,
   Keymap,
+  Menu,
   ViewStateResult,
   WorkspaceLeaf,
   debounce,
   setIcon,
 } from "obsidian";
+import { t } from "../i18n";
+import type { NavPage, NavTarget } from "../nav";
+import { VIEW_TYPE_LIBRARY } from "../nav";
 import type FelisidianPlugin from "../main";
-import { NewNoteModal, NewTagModal } from "../ui/modals";
-import { categoryColor, toHex } from "./colors";
+import { ChecklistSection, closePopover, openChecklistPopover } from "../ui/popover";
+import { fillCard, itemTint } from "./cards";
+import { categoryColor } from "./colors";
 import {
-  CategoryNode,
-  LibraryItem,
-  buildTree,
-  categoryKey,
+  FilterKey,
+  LibraryState,
+  RECENT_LIMIT,
+  SortKey,
+  Tab,
+  VIEW_IDS,
+  ViewId,
+  activeCount,
+  applicability,
+  applyFilters,
+  cloneState,
+  defaultLibraryState,
+  emptyFilters,
+  facetCounts,
+  hasAnyFilter,
+  presetFilters,
+  sortItems,
+} from "./filters";
+import {
   collectCategoryDescriptions,
   collectItems,
-  flattenTree,
-  inCategory,
+  hydratePreviews,
 } from "./model";
-import { renderRing } from "./ui";
+import { buildTree, categoryKey, flattenTree } from "./tree";
+import {
+  CONTENT_KINDS,
+  CategoryNode,
+  ELABORATIONS,
+  FORMATS,
+  LibraryItem,
+  READING_STATUSES,
+} from "./types";
 
-export const VIEW_TYPE_LIBRARY = "felisidian-library";
+export { VIEW_TYPE_LIBRARY };
 
-type SortKey = "manual" | "recent" | "title" | "year" | "progress";
-type Tab = "items" | "notebooks" | "canvases";
-type Mode = "all" | "recent" | "reading";
-
-const SORT_LABELS: Record<SortKey, string> = {
-  manual: "Manual order",
-  recent: "Recently accessed",
-  title: "Title",
-  year: "Year",
-  progress: "Progress",
-};
-
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: "items", label: "Items", icon: "file-text" },
-  { id: "notebooks", label: "Notebooks", icon: "notebook" },
-  { id: "canvases", label: "Canvases", icon: "layout-dashboard" },
+const TABS: { id: Tab; icon: string }[] = [
+  { id: "items", icon: "file-text" },
+  { id: "notebooks", icon: "notebook" },
+  { id: "canvases", icon: "layout-dashboard" },
 ];
 
+const VIEW_ICONS: Record<ViewId, string> = {
+  library: "library",
+  reading: "book-open",
+  captures: "zap",
+  ideas: "lightbulb",
+  recent: "clock",
+};
+
+const SORTS: SortKey[] = ["manual", "recent", "title", "year", "progress"];
+const NEUTRAL = "#b8a88f";
 const LEAVE_MS = 170;
 const MOVE_MS = 320;
 const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
@@ -49,29 +74,31 @@ function reducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-export class LibraryView extends ItemView {
+type ListFilterKey = "types" | "statuses" | "authors" | "formats" | "sources" | "elaborations" | "categories";
+
+export class LibraryView extends ItemView implements NavPage {
+  private state: LibraryState = defaultLibraryState();
   private items: LibraryItem[] = [];
   private itemByPath = new Map<string, LibraryItem>();
   private descriptions: Record<string, string> = {};
-  private category: string | null = null;
-  private mode: Mode = "all";
-  private tab: Tab = "items";
-  private authors = new Set<string>();
-  private sort: SortKey = "recent";
-  private query = "";
 
   private sideEl: HTMLElement;
   private sideListEl: HTMLElement;
   private indicatorEl: HTMLElement;
   private mainEl: HTMLElement;
   private gridEl: HTMLElement;
-  private countEl: HTMLElement;
+  private chipsEl: HTMLElement | null = null;
+  private countEl: HTMLElement | null = null;
+  private filterBtns = new Map<string, HTMLButtonElement>();
+  private searchEl: HTMLInputElement | null = null;
   private sortEl: HTMLSelectElement | null = null;
 
   /** Card elements by note path; they survive re-renders so they can animate. */
   private cards = new Map<string, HTMLElement>();
   private gridToken = 0;
+  private hydrateToken = 0;
   private dragEl: HTMLElement | null = null;
+  private facetMemo = new Map<string, Map<string, number>>();
 
   constructor(leaf: WorkspaceLeaf, private plugin: FelisidianPlugin) {
     super(leaf);
@@ -82,22 +109,60 @@ export class LibraryView extends ItemView {
   }
 
   getDisplayText() {
-    return "Library";
+    return t("view.library");
   }
 
   getIcon() {
     return "library";
   }
 
-  getState() {
-    return { category: this.category };
+  // ---- state, persistence, navigation --------------------------------------
+
+  private currentState(): LibraryState {
+    const s = cloneState(this.state);
+    if (this.mainEl) s.scrollTop = this.mainEl.scrollTop;
+    return s;
   }
 
-  async setState(state: { category?: string | null }, result: ViewStateResult) {
-    this.category = state?.category ?? null;
-    this.mode = "all";
-    if (this.mainEl) this.refresh();
+  /** Remembers where the user is so coming back restores it. */
+  private persist() {
+    this.plugin.libraryState = this.currentState();
+  }
+
+  snapshot(): NavTarget {
+    return { type: "library", state: this.currentState() };
+  }
+
+  getState() {
+    return { lib: this.currentState() };
+  }
+
+  async setState(
+    state: { restore?: boolean; category?: string | null; lib?: LibraryState },
+    result: ViewStateResult
+  ) {
+    if (state?.lib) {
+      this.state = cloneState(state.lib);
+    } else if (state?.restore) {
+      this.state = cloneState(this.plugin.libraryState);
+    } else if (state && "category" in state) {
+      this.state = defaultLibraryState();
+      if (state.category) this.state.filters.categories = [state.category];
+    }
+    if (this.mainEl) {
+      this.refresh();
+      this.restoreScroll(this.state.scrollTop);
+    }
     await super.setState(state, result);
+  }
+
+  private restoreScroll(top: number) {
+    const apply = () => {
+      this.mainEl.scrollTop = top;
+    };
+    apply();
+    requestAnimationFrame(apply);
+    window.setTimeout(apply, 120);
   }
 
   async onOpen() {
@@ -111,6 +176,8 @@ export class LibraryView extends ItemView {
     this.gridEl = createDiv({ cls: "fel-grid" });
     this.setupDrag(this.gridEl);
 
+    this.state = cloneState(this.plugin.libraryState);
+
     const refresh = debounce(() => this.refresh(), 250, true);
     this.registerEvent(this.app.metadataCache.on("changed", refresh));
     this.registerEvent(this.app.metadataCache.on("resolved", refresh));
@@ -119,110 +186,163 @@ export class LibraryView extends ItemView {
     this.registerEvent(this.app.vault.on("create", refresh));
 
     this.refresh();
+    this.restoreScroll(this.state.scrollTop);
   }
+
+  async onClose() {
+    closePopover();
+    this.persist();
+  }
+
+  // ---- data ------------------------------------------------------------------
 
   private color(path: string): string {
     return categoryColor(path, this.plugin.settings.categoryColors);
   }
 
+  private contentItems(): LibraryItem[] {
+    return this.items.filter((i) => i.kind !== "notebook");
+  }
+
   private categoryPaths(): string[] {
-    const own = this.items.filter((i) => i.kind === "item");
-    return flattenTree(buildTree(own, this.plugin.settings.customCategories));
+    return flattenTree(buildTree(this.contentItems(), this.plugin.settings.customCategories));
+  }
+
+  private itemColor(item: LibraryItem): string {
+    const subject = item.category.length ? this.color(categoryKey(item.category)) : NEUTRAL;
+    return itemTint(item, subject);
   }
 
   refresh() {
-    this.items = collectItems(this.app);
+    this.items = collectItems(this.app, this.plugin.previews);
     this.itemByPath = new Map(this.items.map((i) => [i.path, i]));
     this.descriptions = collectCategoryDescriptions(this.app);
-    if (this.category && !this.categoryPaths().includes(this.category)) {
-      this.category = null;
-    }
+    this.facetMemo.clear();
+
+    const known = new Set(this.categoryPaths());
+    this.state.filters.categories = this.state.filters.categories.filter((c) => known.has(c));
+
     this.renderSide();
-    this.renderMain();
+    this.renderMain(true);
+    void this.hydrate();
   }
 
-  private go(category: string | null, mode: Mode = "all") {
-    this.category = category;
-    this.mode = mode;
-    this.authors.clear();
-    this.query = "";
-    this.tab = "items";
-    this.renderSide();
-    this.renderMain();
+  /** Reads the user's own writing for note cards, then refreshes them. */
+  private async hydrate() {
+    const token = ++this.hydrateToken;
+    const changed = await hydratePreviews(this.app, this.items, this.plugin.previews);
+    if (!changed || token !== this.hydrateToken || !this.mainEl.isConnected) return;
+    this.items = collectItems(this.app, this.plugin.previews);
+    this.itemByPath = new Map(this.items.map((i) => [i.path, i]));
+    this.facetMemo.clear();
+    this.renderGrid();
   }
 
-  // ---- sidebar -----------------------------------------------------------
+  // ---- sidebar -----------------------------------------------------------------
 
-  private reading(): LibraryItem[] {
-    return this.items.filter(
-      (i) => i.kind === "item" && i.progress !== undefined && i.progress > 0 && i.progress < 1
-    );
+  private viewCount(view: ViewId): number | undefined {
+    if (view === "recent") return undefined;
+    return applyFilters(this.contentItems(), presetFilters(view)).length;
+  }
+
+  private selectView(view: ViewId) {
+    this.state.view = view;
+    this.state.tab = "items";
+    this.state.filters = presetFilters(view);
+    this.state.sort = view === "recent" ? "recent" : this.state.sort;
+    this.afterNavigation();
+  }
+
+  private selectSubject(path: string) {
+    this.state.view = "library";
+    this.state.tab = "items";
+    this.state.filters = { ...emptyFilters(), categories: [path] };
+    this.afterNavigation();
+  }
+
+  private afterNavigation() {
+    this.persist();
+    this.renderSide();
+    this.renderMain(false);
+  }
+
+  private singleSubject(): string | null {
+    const c = this.state.filters.categories;
+    return c.length === 1 ? c[0] : null;
   }
 
   private renderSide() {
     const list = this.sideListEl;
     list.empty();
 
-    const shortcut = (label: string, mode: Mode, count?: number) => {
-      const active = this.mode === mode && this.category === null;
+    VIEW_IDS.forEach((view) => {
+      const active = this.state.view === view && this.state.filters.categories.length === 0;
       const row = list.createDiv({
         cls: "fel-side-link fel-plain" + (active ? " is-active" : ""),
+        attr: { role: "button", tabindex: "0" },
       });
-      row.createSpan({ cls: "fel-name", text: label });
-      if (count !== undefined) row.createSpan({ cls: "fel-count", text: String(count) });
-      row.addEventListener("click", () => this.go(null, mode));
-    };
-    shortcut("Recent", "recent");
-    shortcut("Reading list", "reading", this.reading().length);
-
-    const heading = list.createDiv({
-      cls: "fel-side-heading" + (this.mode === "all" && !this.category ? " is-active" : ""),
-      text: "My library",
+      setIcon(row.createSpan({ cls: "fel-side-icon" }), VIEW_ICONS[view]);
+      row.createSpan({ cls: "fel-name", text: t(`view.${view}`) });
+      const n = this.viewCount(view);
+      if (n !== undefined) row.createSpan({ cls: "fel-count", text: String(n) });
+      this.onActivate(row, () => this.selectView(view));
     });
-    heading.addEventListener("click", () => this.go(null));
+
+    list.createDiv({ cls: "fel-side-heading", text: t("side.subjects") });
 
     const tree = list.createDiv({ cls: "fel-tree" });
-    const own = this.items.filter((i) => i.kind === "item");
-    buildTree(own, this.plugin.settings.customCategories).forEach((node) =>
+    buildTree(this.contentItems(), this.plugin.settings.customCategories).forEach((node) =>
       this.renderNode(tree, node, 0)
     );
 
-    const add = list.createDiv({ cls: "fel-side-add", text: "New tag +" });
-    add.addEventListener("click", () => {
-      new NewTagModal(this.app, this.plugin, this.categoryPaths(), this.category, (path) =>
-        this.go(path)
-      ).open();
+    const add = list.createDiv({
+      cls: "fel-side-add",
+      text: t("side.newTag"),
+      attr: { role: "button", tabindex: "0" },
     });
+    this.onActivate(add, () => this.plugin.openTagModal(this.singleSubject(), (p) => this.selectSubject(p)));
 
     this.moveIndicator();
   }
 
+  /** Click, Enter or Space. */
+  private onActivate(el: HTMLElement, fn: (evt: Event) => void) {
+    el.addEventListener("click", fn);
+    el.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        fn(evt);
+      }
+    });
+  }
+
   private renderNode(parent: HTMLElement, node: CategoryNode, depth: number) {
+    const active = this.singleSubject() === node.path;
     const row = parent.createDiv({
-      cls: "fel-side-link" + (this.category === node.path ? " is-active" : ""),
+      cls: "fel-side-link" + (active ? " is-active" : ""),
+      attr: { role: "button", tabindex: "0" },
     });
     row.style.paddingLeft = `${8 + depth * 18}px`;
     const dot = row.createSpan({ cls: "fel-dot" });
     dot.style.backgroundColor = this.color(node.path);
     row.createSpan({ cls: "fel-name", text: node.name });
     row.createSpan({ cls: "fel-count", text: String(node.count) });
-    row.addEventListener("click", () => this.go(node.path));
+    this.onActivate(row, () => this.selectSubject(node.path));
     node.children.forEach((c) => this.renderNode(parent, c, depth + 1));
   }
 
   /** Slides the highlight from the previous selection to the new one. */
   private moveIndicator() {
     const ind = this.indicatorEl;
-    const active = this.sideListEl.querySelector<HTMLElement>(
-      ".fel-side-link.is-active, .fel-side-heading.is-active"
-    );
+    const active = this.sideListEl.querySelector<HTMLElement>(".fel-side-link.is-active");
     if (!active) {
       ind.addClass("is-hidden");
       return;
     }
 
-    const color = this.category ? this.color(this.category) : "#b8a88f";
-    ind.style.setProperty("--ind", color);
+    const subject = this.singleSubject();
+    ind.style.setProperty("--ind", subject ? this.color(subject) : NEUTRAL);
+
     // Measure against the scrolling sidebar itself, whatever the row's offsetParent is.
     const side = this.sideEl.getBoundingClientRect();
     const row = active.getBoundingClientRect();
@@ -239,202 +359,445 @@ export class LibraryView extends ItemView {
     }
   }
 
-  // ---- main area ---------------------------------------------------------
+  // ---- main area ----------------------------------------------------------------
 
   private title(): string {
-    if (this.category) return this.category.split("/").pop() ?? "";
-    if (this.mode === "recent") return "Recent";
-    if (this.mode === "reading") return "Reading list";
-    return "My Library";
+    const subject = this.singleSubject();
+    if (subject) return subject.split("/").pop() ?? subject;
+    if (this.state.view !== "library") return t(`view.${this.state.view}`);
+    return t("lib.root");
   }
 
-  private renderMain() {
+  private renderMain(keepScroll: boolean) {
     const first = this.captureRects();
     const main = this.mainEl;
+    const scroll = main.scrollTop;
+    closePopover();
     main.empty();
+    this.filterBtns.clear();
+    this.chipsEl = null;
+    this.countEl = null;
 
     this.renderBreadcrumb(main);
 
-    const head = main.createDiv({ cls: "fel-head" });
-    head.createEl("h1", { text: this.title() });
-    const desc = this.category ? this.descriptions[this.category] : undefined;
+    main.createDiv({ cls: "fel-head" }).createEl("h1", { text: this.title() });
+    const subject = this.singleSubject();
+    const desc = subject ? this.descriptions[subject] : undefined;
     if (desc) main.createEl("p", { cls: "fel-desc", text: desc });
 
     this.renderTabs(main);
 
-    if (this.tab === "canvases") {
+    if (this.state.tab === "canvases") {
       this.cards.clear();
       this.gridEl.empty();
-      this.sortEl = null;
       this.renderCanvases(main);
-      return;
+    } else {
+      const body = main.createDiv({ cls: "fel-tab-body" });
+      this.renderToolbar(body);
+      main.appendChild(this.gridEl);
+      this.updateFilterUI();
+      this.renderGrid(first);
     }
-
-    const body = main.createDiv({ cls: "fel-tab-body" });
-    this.renderAuthors(body, this.scoped());
-    this.renderBar(body);
-    main.appendChild(this.gridEl);
-    this.renderGrid(first);
+    if (keepScroll) main.scrollTop = scroll;
   }
 
   private renderBreadcrumb(parent: HTMLElement) {
     const bc = parent.createDiv({ cls: "fel-crumbs" });
-    const root = bc.createSpan({ cls: "fel-crumb", text: "My Library" });
-    root.addEventListener("click", () => this.go(null));
-    if (!this.category) return;
+    const root = bc.createSpan({
+      cls: "fel-crumb",
+      text: t("lib.root"),
+      attr: { role: "button", tabindex: "0" },
+    });
+    this.onActivate(root, () => this.selectView("library"));
 
-    const segs = this.category.split("/");
+    const subject = this.singleSubject();
+    if (!subject) {
+      if (this.state.view !== "library") {
+        bc.createSpan({ cls: "fel-crumb-sep", text: "/" });
+        bc.createSpan({ cls: "fel-crumb is-current", text: t(`view.${this.state.view}`) });
+      }
+      return;
+    }
+
+    const segs = subject.split("/");
     segs.forEach((seg, i) => {
       bc.createSpan({ cls: "fel-crumb-sep", text: "/" });
       const key = segs.slice(0, i + 1).join("/");
-      const crumb = bc.createSpan({ cls: "fel-crumb" });
+      const crumb = bc.createSpan({ cls: "fel-crumb", attr: { role: "button", tabindex: "0" } });
       if (i === segs.length - 1) {
         const dot = crumb.createSpan({ cls: "fel-dot" });
         dot.style.backgroundColor = this.color(key);
       }
       crumb.createSpan({ text: seg });
-      crumb.addEventListener("click", () => this.go(key));
+      this.onActivate(crumb, () => this.selectSubject(key));
     });
   }
 
   private renderTabs(parent: HTMLElement) {
-    const tabs = parent.createDiv({ cls: "fel-tabs" });
-    TABS.forEach((t) => {
-      const el = tabs.createDiv({ cls: "fel-tab" + (this.tab === t.id ? " is-active" : "") });
-      setIcon(el.createSpan({ cls: "fel-tab-icon" }), t.icon);
-      el.createSpan({ text: t.label });
-      el.addEventListener("click", () => {
-        this.tab = t.id;
-        this.renderMain();
+    const tabs = parent.createDiv({ cls: "fel-tabs", attr: { role: "tablist" } });
+    TABS.forEach((tab) => {
+      const active = this.state.tab === tab.id;
+      const el = tabs.createDiv({
+        cls: "fel-tab" + (active ? " is-active" : ""),
+        attr: { role: "tab", tabindex: "0", "aria-selected": String(active) },
+      });
+      setIcon(el.createSpan({ cls: "fel-tab-icon" }), tab.icon);
+      el.createSpan({ text: t(`tab.${tab.id}`) });
+      this.onActivate(el, () => {
+        this.state.tab = tab.id;
+        this.persist();
+        this.renderMain(false);
       });
     });
   }
 
-  private renderBar(parent: HTMLElement) {
-    const bar = parent.createDiv({ cls: "fel-bar" });
-    this.countEl = bar.createSpan({ cls: "fel-total" });
+  // ---- toolbar: filters, search, sort ------------------------------------------
 
-    const add = bar.createEl("button", { cls: "fel-btn" });
-    setIcon(add.createSpan(), "plus");
-    add.createSpan({ text: "Add" });
-    add.addEventListener("click", () => this.addItem());
+  private renderToolbar(parent: HTMLElement) {
+    const f = this.state.filters;
+    const bar = parent.createDiv({ cls: "fel-tools" });
+    const left = bar.createDiv({ cls: "fel-filterbar", attr: { role: "group", "aria-label": t("f.active") } });
 
-    const search = bar.createEl("input", {
+    if (this.state.tab === "items") {
+      const appl = applicability(this.contentItems(), f);
+      this.filterButton(left, "types", t("f.type"), () => [this.typeSection()]);
+      if (appl.status) this.filterButton(left, "statuses", t("f.status"), () => [this.statusSection()]);
+      if (appl.authors) this.filterButton(left, "authors", t("f.authors"), () => [this.authorsSection()]);
+      const more = this.moreSections(appl);
+      if (more.length) this.filterButton(left, "more", t("f.more"), () => this.moreSections(applicability(this.contentItems(), this.state.filters)));
+    }
+
+    const right = bar.createDiv({ cls: "fel-tools-end" });
+
+    const search = right.createEl("input", {
       cls: "fel-search",
       type: "search",
-      placeholder: "Search title or author",
+      placeholder: t("lib.search"),
+      attr: { "aria-label": t("lib.search") },
     });
-    search.value = this.query;
+    search.value = f.query;
     search.addEventListener("input", () => {
-      this.query = search.value;
-      this.renderGrid();
+      this.state.filters.query = search.value;
+      this.onFiltersChanged();
     });
+    this.searchEl = search;
 
-    const select = bar.createEl("select", { cls: "dropdown fel-sort" });
-    (Object.keys(SORT_LABELS) as SortKey[]).forEach((key) => {
-      const opt = select.createEl("option", { value: key, text: SORT_LABELS[key] });
-      opt.selected = key === this.sort;
+    const select = right.createEl("select", { cls: "dropdown fel-sort", attr: { "aria-label": t("f.more") } });
+    SORTS.forEach((key) => {
+      const opt = select.createEl("option", { value: key, text: t(`sort.${key}`) });
+      opt.selected = key === this.state.sort;
     });
     select.addEventListener("change", () => {
-      this.sort = select.value as SortKey;
+      this.state.sort = select.value as SortKey;
+      this.persist();
       this.renderGrid();
     });
     this.sortEl = select;
+
+    const add = right.createEl("button", { cls: "fel-btn" });
+    setIcon(add.createSpan(), "plus");
+    add.createSpan({ text: t("lib.add") });
+    add.addEventListener("click", (evt) => this.openAddMenu(evt));
+
+    const row = parent.createDiv({ cls: "fel-chiprow" });
+    this.chipsEl = row.createDiv({ cls: "fel-chips", attr: { role: "list", "aria-label": t("f.active") } });
+    this.countEl = row.createDiv({ cls: "fel-total", attr: { "aria-live": "polite" } });
   }
 
-  private scoped(): LibraryItem[] {
-    const kind = this.tab === "notebooks" ? "notebook" : "item";
-    return this.items.filter((i) => {
-      if (i.kind !== kind) return false;
-      if (this.mode === "reading") {
-        return i.progress !== undefined && i.progress > 0 && i.progress < 1;
+  private openAddMenu(evt: MouseEvent) {
+    if (this.state.tab === "notebooks") {
+      this.plugin.openSourceModal(this.singleSubject(), true);
+      return;
+    }
+    const subject = this.singleSubject();
+    const menu = new Menu();
+    menu.addItem((i) => i.setTitle(t("add.source")).setIcon("book-open").onClick(() => this.plugin.openSourceModal(subject, false)));
+    menu.addItem((i) => i.setTitle(t("add.capture")).setIcon("zap").onClick(() => this.plugin.openCaptureModal(subject)));
+    menu.addItem((i) => i.setTitle(t("add.idea")).setIcon("lightbulb").onClick(() => this.plugin.openIdeaModal(null)));
+    menu.addItem((i) => i.setTitle(t("add.readingNote")).setIcon("quote").onClick(() => this.plugin.openReadingNoteModal(null, "")));
+    menu.addItem((i) => i.setTitle(t("add.notebook")).setIcon("notebook").onClick(() => this.plugin.openSourceModal(subject, true)));
+    menu.showAtMouseEvent(evt);
+  }
+
+  private filterButton(
+    parent: HTMLElement,
+    id: string,
+    label: string,
+    sections: () => ChecklistSection[]
+  ) {
+    const btn = parent.createEl("button", {
+      cls: "fel-filter-btn",
+      attr: { "aria-haspopup": "dialog", "aria-expanded": "false" },
+    });
+    btn.createSpan({ cls: "fel-filter-label", text: label });
+    btn.createSpan({ cls: "fel-filter-badge" });
+    setIcon(btn.createSpan({ cls: "fel-filter-chev" }), "chevron-down");
+    btn.addEventListener("click", () => {
+      if (btn.getAttr("aria-expanded") === "true") {
+        closePopover();
+        return;
       }
-      return inCategory(i, this.category);
+      openChecklistPopover(btn, label, sections(), () => this.onFiltersChanged(false));
     });
+    this.filterBtns.set(id, btn);
   }
 
-  /** The Authors section can be collapsed; the choice is remembered. */
-  private renderAuthors(parent: HTMLElement, scoped: LibraryItem[]) {
-    const counts = new Map<string, number>();
-    scoped.forEach((i) =>
-      i.authors.forEach((a) => counts.set(a, (counts.get(a) ?? 0) + 1))
+  // ---- filter sections ----------------------------------------------------------
+
+  /** Counts per value for one filter, given all the other active filters. */
+  private counts(key: FilterKey, valuesOf: (i: LibraryItem) => string[]): Map<string, number> {
+    let memo = this.facetMemo.get(key);
+    if (!memo) {
+      memo = facetCounts(this.contentItems(), this.state.filters, key, valuesOf);
+      this.facetMemo.set(key, memo);
+    }
+    return memo;
+  }
+
+  private toggleValue(key: ListFilterKey, value: string) {
+    const list = this.state.filters[key] as string[];
+    const at = list.indexOf(value);
+    if (at >= 0) list.splice(at, 1);
+    else list.push(value);
+  }
+
+  private listSection(
+    key: ListFilterKey,
+    title: string | undefined,
+    options: ChecklistSection["options"],
+    valuesOf: (i: LibraryItem) => string[],
+    extra: Partial<ChecklistSection> = {}
+  ): ChecklistSection {
+    return {
+      title,
+      options,
+      isSelected: (v) => (this.state.filters[key] as string[]).includes(v),
+      toggle: (v) => this.toggleValue(key, v),
+      count: (v) => this.counts(key, valuesOf).get(v) ?? 0,
+      ...extra,
+    };
+  }
+
+  private typeSection(): ChecklistSection {
+    return this.listSection(
+      "types",
+      undefined,
+      CONTENT_KINDS.map((k) => ({ value: k, label: t(`kind.${k}`) })),
+      (i) => [i.kind]
     );
-    if (counts.size === 0) return;
-
-    const open = this.plugin.settings.authorsOpen;
-    const label = parent.createDiv({
-      cls: "fel-section",
-      attr: { role: "button", "aria-expanded": String(open), title: "Show or hide authors" },
-    });
-    const chev = label.createSpan({ cls: "fel-chev" + (open ? " is-open" : "") });
-    setIcon(chev, "chevron-down");
-    label.createSpan({ text: "Authors" });
-    label.createDiv({ cls: "fel-rule" });
-
-    const collapse = parent.createDiv({ cls: "fel-collapse" + (open ? " is-open" : "") });
-    const wrap = collapse.createDiv({ cls: "fel-collapse-inner" }).createDiv({ cls: "fel-chips" });
-
-    [...counts.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, 24)
-      .forEach(([author, n]) => {
-        const chip = wrap.createDiv({
-          cls: "fel-chip" + (this.authors.has(author) ? " is-active" : ""),
-        });
-        chip.createSpan({ text: author });
-        chip.createSpan({ cls: "fel-chip-n", text: String(n) });
-        chip.addEventListener("click", () => {
-          if (this.authors.has(author)) this.authors.delete(author);
-          else this.authors.add(author);
-          chip.toggleClass("is-active", this.authors.has(author));
-          this.renderGrid();
-        });
-      });
-
-    label.addEventListener("click", () => {
-      const next = !collapse.hasClass("is-open");
-      collapse.toggleClass("is-open", next);
-      chev.toggleClass("is-open", next);
-      label.setAttr("aria-expanded", String(next));
-      this.plugin.settings.authorsOpen = next;
-      void this.plugin.saveData(this.plugin.settings);
-    });
   }
 
-  // ---- cards: filtering, ordering, animation ----------------------------
+  private statusSection(): ChecklistSection {
+    return this.listSection(
+      "statuses",
+      undefined,
+      READING_STATUSES.map((s) => ({ value: s, label: t(`status.${s}`) })),
+      (i) => (i.status ? [i.status] : [])
+    );
+  }
+
+  private authorsSection(): ChecklistSection {
+    const tally = new Map<string, number>();
+    this.contentItems().forEach((i) => i.authors.forEach((a) => tally.set(a, (tally.get(a) ?? 0) + 1)));
+    const names = [...tally.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([a]) => a);
+    return this.listSection(
+      "authors",
+      undefined,
+      names.map((a) => ({ value: a, label: a })),
+      (i) => i.authors,
+      { searchable: { placeholder: t("f.searchAuthors") } }
+    );
+  }
+
+  private moreSections(appl: ReturnType<typeof applicability>): ChecklistSection[] {
+    const sections: ChecklistSection[] = [];
+    const items = this.contentItems();
+
+    if (appl.subject) {
+      const tree = buildTree(items, this.plugin.settings.customCategories);
+      const options: ChecklistSection["options"] = [];
+      const walk = (nodes: CategoryNode[], depth: number) =>
+        nodes.forEach((n) => {
+          options.push({ value: n.path, label: n.name, color: this.color(n.path), indent: depth });
+          walk(n.children, depth + 1);
+        });
+      walk(tree, 0);
+      sections.push(
+        this.listSection("categories", t("f.subject"), options, (i) =>
+          // The item's subject and each of its parents.
+          i.category.map((_, n) => categoryKey(i.category.slice(0, n + 1)))
+        )
+      );
+    }
+
+    if (appl.format) {
+      sections.push(
+        this.listSection(
+          "formats",
+          t("f.format"),
+          FORMATS.map((f) => ({ value: f, label: t(`format.${f}`) })),
+          (i) => (i.format ? [i.format] : [])
+        )
+      );
+    }
+
+    if (appl.source) {
+      const linked = new Set<string>();
+      items.forEach((i) => i.kind !== "source" && i.sourcePaths.forEach((p) => linked.add(p)));
+      const options = [...linked]
+        .map((p) => this.itemByPath.get(p))
+        .filter((s): s is LibraryItem => !!s)
+        .sort((a, b) => a.title.localeCompare(b.title))
+        .map((s) => ({ value: s.path, label: s.title }));
+      if (options.length) {
+        sections.push(this.listSection("sources", t("f.source"), options, (i) => i.sourcePaths));
+      }
+    }
+
+    if (appl.elaboration) {
+      sections.push(
+        this.listSection(
+          "elaborations",
+          t("f.elab"),
+          ELABORATIONS.map((e) => ({ value: e, label: t(`elab.${e}`) })),
+          (i) => (i.elaboration ? [i.elaboration] : [])
+        )
+      );
+    }
+
+    if (appl.connections) {
+      sections.push({
+        title: t("f.conn"),
+        options: [
+          { value: "with", label: t("f.connWith") },
+          { value: "without", label: t("f.connWithout") },
+        ],
+        isSelected: (v) => this.state.filters.connections === v,
+        toggle: (v) => {
+          this.state.filters.connections =
+            this.state.filters.connections === v ? null : (v as "with" | "without");
+        },
+        count: (v) => {
+          const pool = applyFilters(items, this.state.filters, ["connections"]);
+          return pool.filter((i) => (v === "with" ? i.connections > 0 : i.connections === 0)).length;
+        },
+      });
+    }
+    return sections;
+  }
+
+  // ---- active filters: chips and counts --------------------------------------------
+
+  private onFiltersChanged(rebuildToolbar = false) {
+    this.facetMemo.clear();
+    this.persist();
+    if (rebuildToolbar) this.renderMain(true);
+    else {
+      this.updateFilterUI();
+      this.renderGrid();
+    }
+  }
+
+  private chipList(): { label: string; remove: () => void }[] {
+    const f = this.state.filters;
+    const chips: { label: string; remove: () => void }[] = [];
+    const add = (group: string, value: string, remove: () => void) =>
+      chips.push({ label: `${group}: ${value}`, remove });
+    const dropFrom = (key: ListFilterKey, v: string) => () => {
+      this.state.filters[key] = (this.state.filters[key] as string[]).filter((x) => x !== v) as never;
+    };
+
+    f.types.forEach((v) => add(t("f.type"), t(`kind.${v}`), dropFrom("types", v)));
+    f.statuses.forEach((v) => add(t("f.status"), t(`status.${v}`), dropFrom("statuses", v)));
+    f.authors.forEach((v) => add(t("f.authors"), v, dropFrom("authors", v)));
+    f.categories.forEach((v) => add(t("f.subject"), v.split("/").pop() ?? v, dropFrom("categories", v)));
+    f.formats.forEach((v) => add(t("f.format"), t(`format.${v}`), dropFrom("formats", v)));
+    f.sources.forEach((v) => add(t("f.source"), this.itemByPath.get(v)?.title ?? v, dropFrom("sources", v)));
+    f.elaborations.forEach((v) => add(t("f.elab"), t(`elab.${v}`), dropFrom("elaborations", v)));
+    if (f.connections) {
+      add(t("f.conn"), t(f.connections === "with" ? "f.connWith" : "f.connWithout"), () => {
+        this.state.filters.connections = null;
+      });
+    }
+    return chips;
+  }
+
+  private clearFilters() {
+    this.state.filters = emptyFilters();
+    if (this.searchEl) this.searchEl.value = "";
+    this.onFiltersChanged(true);
+  }
+
+  /** Button badges, removable chips and the result count. */
+  private updateFilterUI() {
+    const f = this.state.filters;
+    const perButton: Record<string, number> = {
+      types: f.types.length,
+      statuses: f.statuses.length,
+      authors: f.authors.length,
+      more:
+        f.categories.length +
+        f.formats.length +
+        f.sources.length +
+        f.elaborations.length +
+        (f.connections ? 1 : 0),
+    };
+    this.filterBtns.forEach((btn, id) => {
+      const n = perButton[id] ?? 0;
+      btn.toggleClass("is-active", n > 0);
+      const badge = btn.querySelector<HTMLElement>(".fel-filter-badge");
+      badge?.setText(n > 0 ? String(n) : "");
+      badge?.toggleClass("is-visible", n > 0);
+    });
+
+    const chipsEl = this.chipsEl;
+    if (!chipsEl) return;
+    chipsEl.empty();
+    const chips = this.state.tab === "items" ? this.chipList() : [];
+    chips.forEach((chip) => {
+      const el = chipsEl.createDiv({ cls: "fel-active-chip", attr: { role: "listitem" } });
+      el.createSpan({ text: chip.label });
+      const x = el.createEl("button", {
+        cls: "fel-chip-x",
+        attr: { "aria-label": `${t("f.remove")}: ${chip.label}` },
+      });
+      setIcon(x, "x");
+      x.addEventListener("click", () => {
+        chip.remove();
+        this.onFiltersChanged(true);
+      });
+    });
+    if (activeCount(f) > 0 || f.query.trim()) {
+      const clear = chipsEl.createEl("button", { cls: "fel-clear", text: t("f.clear") });
+      clear.addEventListener("click", () => this.clearFilters());
+    }
+  }
+
+  // ---- cards: filtering, ordering, animation ------------------------------------------
 
   private scopeKey(): string {
-    return `${this.mode}|${this.tab}|${this.category ?? ""}`;
+    return `${this.state.view}|${this.state.tab}|${this.state.filters.categories.join("+")}`;
   }
 
   private visible(): LibraryItem[] {
-    const q = this.query.trim().toLowerCase();
-    const list = this.scoped().filter((i) => {
-      if ([...this.authors].some((a) => !i.authors.includes(a))) return false;
-      if (!q) return true;
-      return (
-        i.title.toLowerCase().includes(q) ||
-        i.authors.some((a) => a.toLowerCase().includes(q))
+    const f = this.state.filters;
+    let list: LibraryItem[];
+    if (this.state.tab === "notebooks") {
+      list = applyFilters(
+        this.items.filter((i) => i.kind === "notebook"),
+        { ...emptyFilters(), query: f.query }
       );
-    });
-
-    if (this.sort === "manual") {
-      const order = this.plugin.settings.cardOrder[this.scopeKey()] ?? [];
-      const rank = (p: string) => {
-        const i = order.indexOf(p);
-        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-      };
-      return list.sort((a, b) => rank(a.path) - rank(b.path) || b.mtime - a.mtime);
+    } else {
+      list = applyFilters(this.contentItems(), f);
     }
 
-    const cmp: Record<Exclude<SortKey, "manual">, (a: LibraryItem, b: LibraryItem) => number> = {
-      recent: (a, b) => b.mtime - a.mtime,
-      title: (a, b) => a.title.localeCompare(b.title),
-      year: (a, b) => (b.year ?? 0) - (a.year ?? 0),
-      progress: (a, b) => (b.progress ?? -1) - (a.progress ?? -1),
-    };
-    const sorted = list.sort(cmp[this.sort]);
-    return this.mode === "recent" ? sorted.slice(0, 24) : sorted;
+    const order = this.plugin.settings.cardOrder[this.scopeKey()] ?? [];
+    const sorted = sortItems(list, this.state.sort, order);
+    const limited =
+      this.state.view === "recent" && this.state.sort === "recent" && this.state.tab === "items";
+    return limited ? sorted.slice(0, RECENT_LIMIT) : sorted;
   }
 
   private captureRects(): Map<string, DOMRect> {
@@ -469,9 +832,8 @@ export class LibraryView extends ItemView {
     if (!this.gridEl.isConnected) return;
     const token = ++this.gridToken;
     const list = this.visible();
-    const label = this.tab === "notebooks" ? "Notebooks" : "Items";
-    this.countEl?.setText(`${label} (${list.length})`);
-    if (this.sortEl) this.sortEl.value = this.sort;
+    this.countEl?.setText(list.length === 1 ? t("lib.result1") : t("lib.results", { n: list.length }));
+    if (this.sortEl) this.sortEl.value = this.state.sort;
 
     const wanted = new Set(list.map((i) => i.path));
     const leaving: HTMLElement[] = [];
@@ -498,18 +860,31 @@ export class LibraryView extends ItemView {
     }
   }
 
+  private emptyMessage(): { text: string; clear: boolean } {
+    const hasContent = this.state.tab === "notebooks"
+      ? this.items.some((i) => i.kind === "notebook")
+      : this.contentItems().length > 0;
+    if (!hasContent && this.state.tab === "items") return { text: t("lib.emptyLibrary"), clear: false };
+
+    const f = this.state.filters;
+    const preset = JSON.stringify({ ...presetFilters(this.state.view) });
+    const same = JSON.stringify({ ...f, query: "" }) === preset && !f.query.trim();
+    if (!hasAnyFilter(f) || same) return { text: t("lib.emptyView"), clear: false };
+    return { text: t("lib.noResults"), clear: true };
+  }
+
   private placeCards(list: LibraryItem[], first: Map<string, DOMRect>, animate: boolean) {
     const grid = this.gridEl;
     grid.querySelector(".fel-empty")?.remove();
 
     if (list.length === 0) {
-      grid.createDiv({
-        cls: "fel-empty",
-        text:
-          this.items.length === 0
-            ? "No items yet. Add a category property to a note to see it here."
-            : "Nothing here yet.",
-      });
+      const empty = grid.createDiv({ cls: "fel-empty" });
+      const msg = this.emptyMessage();
+      empty.createDiv({ text: msg.text });
+      if (msg.clear) {
+        const btn = empty.createEl("button", { cls: "fel-btn", text: t("f.clear") });
+        btn.addEventListener("click", () => this.clearFilters());
+      }
       return;
     }
 
@@ -521,7 +896,7 @@ export class LibraryView extends ItemView {
         this.cards.set(item.path, el);
         entering.push(el);
       }
-      this.fillCard(el, item);
+      this.fill(el, item);
       grid.appendChild(el); // appending in order also re-orders existing cards
     });
 
@@ -538,14 +913,30 @@ export class LibraryView extends ItemView {
     });
   }
 
+  private fill(el: HTMLElement, item: LibraryItem) {
+    const source = item.sourcePath ? this.itemByPath.get(item.sourcePath) : undefined;
+    fillCard(el, item, { color: this.itemColor(item), sourceTitle: source?.title });
+  }
+
+  private openNote(path: string | undefined, evt: Event) {
+    if (!path) return;
+    const modifier = evt instanceof MouseEvent && Keymap.isModEvent(evt);
+    void this.plugin.nav.openReader(path, modifier ? "tab" : this.leaf);
+  }
+
   private createCard(path: string): HTMLElement {
     const el = createDiv({ cls: "fel-card" });
     el.dataset.path = path;
     el.draggable = true;
+    el.setAttr("role", "button");
+    el.setAttr("tabindex", "0");
 
-    el.addEventListener("click", (evt) => {
-      const target = el.dataset.path;
-      if (target) this.plugin.openReader(target, Keymap.isModEvent(evt) ? "tab" : this.leaf);
+    el.addEventListener("click", (evt) => this.openNote(el.dataset.path, evt));
+    el.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        this.openNote(el.dataset.path, evt);
+      }
     });
     el.addEventListener("dragstart", (evt) => {
       this.dragEl = el;
@@ -557,31 +948,7 @@ export class LibraryView extends ItemView {
     return el;
   }
 
-  private fillCard(el: HTMLElement, item: LibraryItem) {
-    el.empty();
-    const key = categoryKey(item.category);
-    el.style.setProperty("--fel-cat", toHex(item.color) ?? this.color(key));
-
-    const top = el.createDiv({ cls: "fel-card-top" });
-    if (item.year) top.createSpan({ cls: "fel-badge", text: String(item.year) });
-    top.createSpan({ cls: "fel-card-cat", text: item.category[item.category.length - 1] });
-
-    el.createDiv({ cls: "fel-card-title", text: item.title });
-    if (item.authors.length) {
-      el.createDiv({ cls: "fel-card-authors", text: item.authors.join(", ") });
-    }
-
-    const foot = el.createDiv({ cls: "fel-card-foot" });
-    const notes = foot.createSpan({ cls: "fel-notes" });
-    setIcon(notes.createSpan({ cls: "fel-notes-icon" }), "message-square");
-    notes.createSpan({ text: String(item.notes) });
-    if (item.pages) {
-      foot.createSpan({ cls: "fel-pages", text: `${item.currentPage ?? 0}/${item.pages} p.` });
-    }
-    renderRing(foot, item.progress);
-  }
-
-  // ---- drag to reorder ---------------------------------------------------
+  // ---- drag to reorder -------------------------------------------------------------
 
   private setupDrag(grid: HTMLElement) {
     grid.addEventListener("dragover", (evt) => {
@@ -616,15 +983,17 @@ export class LibraryView extends ItemView {
       .map((c) => c.dataset.path)
       .filter((p): p is string => !!p);
     this.plugin.settings.cardOrder[this.scopeKey()] = order;
-    this.sort = "manual";
+    this.state.sort = "manual";
     if (this.sortEl) this.sortEl.value = "manual";
+    this.persist();
     void this.plugin.saveData(this.plugin.settings);
   }
 
-  // ---- canvases / add ------------------------------------------------------
+  // ---- canvases -----------------------------------------------------------------------
 
   private renderCanvases(parent: HTMLElement) {
-    const needle = this.category?.split("/").pop()?.toLowerCase();
+    const subject = this.singleSubject();
+    const needle = subject?.split("/").pop()?.toLowerCase();
     const files = this.app.vault
       .getFiles()
       .filter((f) => f.extension === "canvas")
@@ -632,26 +1001,17 @@ export class LibraryView extends ItemView {
 
     const list = parent.createDiv({ cls: "fel-tab-body fel-rows" });
     if (files.length === 0) {
-      list.createDiv({ cls: "fel-empty", text: "No canvases here yet." });
+      list.createDiv({ cls: "fel-empty", text: t("lib.noCanvases") });
       return;
     }
     files.forEach((file) => {
-      const row = list.createDiv({ cls: "fel-row" });
+      const row = list.createDiv({ cls: "fel-row", attr: { role: "button", tabindex: "0" } });
       setIcon(row.createSpan(), "layout-dashboard");
       row.createSpan({ text: file.basename });
-      row.addEventListener("click", (evt) => {
-        this.app.workspace.getLeaf(Keymap.isModEvent(evt)).openFile(file);
+      this.onActivate(row, (evt) => {
+        const modifier = evt instanceof MouseEvent && Keymap.isModEvent(evt);
+        void this.app.workspace.getLeaf(modifier).openFile(file);
       });
     });
-  }
-
-  private addItem() {
-    new NewNoteModal(
-      this.app,
-      this.plugin,
-      this.categoryPaths(),
-      this.category,
-      this.tab === "notebooks"
-    ).open();
   }
 }

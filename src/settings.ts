@@ -3,10 +3,14 @@ import type FelisidianPlugin from "./main";
 import { PALETTE, colorKeyFor } from "./library/colors";
 import { renderSwatches } from "./library/ui";
 
+import type { LanguagePreference } from "./i18n";
+
 export type FontChoice = "serif" | "sans" | "mono" | "custom";
 
 export interface FelisidianSettings {
   enabled: boolean;
+  /** Language of the library, reader and windows. */
+  language: LanguagePreference;
   accentColor: string;
   fontSize: number;
   radius: number;
@@ -31,6 +35,7 @@ export interface FelisidianSettings {
 
 export const DEFAULT_SETTINGS: FelisidianSettings = {
   enabled: true,
+  language: "auto",
   accentColor: "#7c5cff",
   fontSize: 16,
   radius: 8,
@@ -63,6 +68,21 @@ export class FelisidianSettingTab extends PluginSettingTab {
           s.enabled = v;
           await this.plugin.saveSettings();
         })
+      );
+
+    new Setting(containerEl)
+      .setName("Language")
+      .setDesc("Language of the library, reader and creation windows.")
+      .addDropdown((d) =>
+        d
+          .addOption("auto", "Automatic")
+          .addOption("en", "English")
+          .addOption("pt", "Português")
+          .setValue(s.language)
+          .onChange(async (v) => {
+            s.language = v as LanguagePreference;
+            await this.plugin.saveSettings();
+          })
       );
 
     new Setting(containerEl).setName("Text").setHeading();

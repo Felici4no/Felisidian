@@ -1,6 +1,8 @@
 import { App } from "obsidian";
 
 export interface LibraryItem {
+  /** "notebook" for notes declaring `type: notebook`, otherwise "item". */
+  kind: "item" | "notebook";
   path: string;
   title: string;
   authors: string[];
@@ -59,6 +61,7 @@ export function collectItems(app: App): LibraryItem[] {
         : undefined;
 
     items.push({
+      kind: fm.type === "notebook" ? "notebook" : "item",
       path: file.path,
       title: typeof fm.title === "string" && fm.title ? fm.title : file.basename,
       authors: asList(fm.authors),
@@ -72,6 +75,21 @@ export function collectItems(app: App): LibraryItem[] {
     });
   }
   return items;
+}
+
+/**
+ * Category descriptions: notes with `fel_category: <path>` and
+ * `description: <text>` describe that category's page.
+ */
+export function collectCategoryDescriptions(app: App): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const file of app.vault.getMarkdownFiles()) {
+    const fm = app.metadataCache.getFileCache(file)?.frontmatter;
+    if (fm && typeof fm.fel_category === "string" && typeof fm.description === "string") {
+      out[fm.fel_category] = fm.description;
+    }
+  }
+  return out;
 }
 
 export function categoryKey(path: string[]): string {

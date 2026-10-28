@@ -1,4 +1,11 @@
-import { ItemView, Keymap, WorkspaceLeaf, debounce } from "obsidian";
+import {
+  ItemView,
+  Keymap,
+  ViewStateResult,
+  WorkspaceLeaf,
+  debounce,
+  setIcon,
+} from "obsidian";
 import type FelisidianPlugin from "../main";
 import { categoryColor } from "./colors";
 import {
@@ -6,31 +13,44 @@ import {
   LibraryItem,
   buildTree,
   categoryKey,
+  collectCategoryDescriptions,
   collectItems,
   inCategory,
 } from "./model";
+import { renderRing } from "./ui";
 
 export const VIEW_TYPE_LIBRARY = "felisidian-library";
 
 type SortKey = "recent" | "title" | "year" | "progress";
+type Tab = "items" | "notebooks" | "canvases";
+type Mode = "all" | "recent" | "reading";
 
 const SORT_LABELS: Record<SortKey, string> = {
-  recent: "Recently modified",
+  recent: "Recently accessed",
   title: "Title",
   year: "Year",
   progress: "Progress",
 };
 
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: "items", label: "Items", icon: "file-text" },
+  { id: "notebooks", label: "Notebooks", icon: "notebook" },
+  { id: "canvases", label: "Canvases", icon: "layout-dashboard" },
+];
+
 export class LibraryView extends ItemView {
   private items: LibraryItem[] = [];
+  private descriptions: Record<string, string> = {};
   private category: string | null = null;
+  private mode: Mode = "all";
+  private tab: Tab = "items";
   private authors = new Set<string>();
   private sort: SortKey = "recent";
   private query = "";
 
   private sideEl: HTMLElement;
   private mainEl: HTMLElement;
-  private gridEl: HTMLElement;
+  private bodyEl: HTMLElement;
   private countEl: HTMLElement;
 
   constructor(leaf: WorkspaceLeaf, private plugin: FelisidianPlugin) {
@@ -49,6 +69,17 @@ export class LibraryView extends ItemView {
     return "library";
   }
 
+  getState() {
+    return { category: this.category };
+  }
+
+  async setState(state: { category?: string | null }, result: ViewStateResult) {
+    this.category = state?.category ?? null;
+    this.mode = "all";
+    if (this.mainEl) this.refresh();
+    await super.setState(state, result);
+  }
+
   async onOpen() {
     this.contentEl.empty();
     this.contentEl.addClass("fel-lib");
@@ -60,6 +91,7 @@ export class LibraryView extends ItemView {
     this.registerEvent(this.app.metadataCache.on("resolved", refresh));
     this.registerEvent(this.app.vault.on("delete", refresh));
     this.registerEvent(this.app.vault.on("rename", refresh));
+    this.registerEvent(this.app.vault.on("create", refresh));
 
     this.refresh();
   }
@@ -70,6 +102,7 @@ export class LibraryView extends ItemView {
 
   private refresh() {
     this.items = collectItems(this.app);
+    this.descriptions = collectCategoryDescriptions(this.app);
     if (this.category && !this.items.some((i) => inCategory(i, this.category))) {
       this.category = null;
     }
@@ -77,22 +110,47 @@ export class LibraryView extends ItemView {
     this.renderMain();
   }
 
+  private go(category: string | null, mode: Mode = "all") {
+    this.category = category;
+    this.mode = mode;
+    this.authors.clear();
+    this.query = "";
+    this.tab = "items";
+    this.renderSide();
+    this.renderMain();
+  }
+
   // ---- sidebar -----------------------------------------------------------
+
+  private reading(): LibraryItem[] {
+    return this.items.filter(
+      (i) => i.kind === "item" && i.progress !== undefined && i.progress > 0 && i.progress < 1
+    );
+  }
 
   private renderSide() {
     const side = this.sideEl;
     side.empty();
 
-    const all = side.createDiv({
-      cls: "fel-side-link" + (this.category === null ? " is-active" : ""),
-    });
-    all.createSpan({ text: "All items" });
-    all.createSpan({ cls: "fel-count", text: String(this.items.length) });
-    all.addEventListener("click", () => this.selectCategory(null));
+    const shortcut = (label: string, mode: Mode, count?: number) => {
+      const row = side.createDiv({
+        cls:
+          "fel-side-link fel-plain" +
+          (this.mode === mode && this.category === null ? " is-active" : ""),
+      });
+      row.createSpan({ cls: "fel-name", text: label });
+      if (count !== undefined) row.createSpan({ cls: "fel-count", text: String(count) });
+      row.addEventListener("click", () => this.go(null, mode));
+    };
+    shortcut("Recent", "recent");
+    shortcut("Reading list", "reading", this.reading().length);
 
-    side.createDiv({ cls: "fel-side-heading", text: "My library" });
+    const heading = side.createDiv({ cls: "fel-side-heading", text: "My library" });
+    heading.addEventListener("click", () => this.go(null));
+
     const tree = side.createDiv({ cls: "fel-tree" });
-    buildTree(this.items).forEach((node) => this.renderNode(tree, node, 0));
+    const own = this.items.filter((i) => i.kind === "item");
+    buildTree(own).forEach((node) => this.renderNode(tree, node, 0));
   }
 
   private renderNode(parent: HTMLElement, node: CategoryNode, depth: number) {
@@ -104,40 +162,85 @@ export class LibraryView extends ItemView {
     dot.style.backgroundColor = this.color(node.path);
     row.createSpan({ cls: "fel-name", text: node.name });
     row.createSpan({ cls: "fel-count", text: String(node.count) });
-    row.addEventListener("click", () => this.selectCategory(node.path));
+    row.addEventListener("click", () => this.go(node.path));
     node.children.forEach((c) => this.renderNode(parent, c, depth + 1));
-  }
-
-  private selectCategory(path: string | null) {
-    this.category = path;
-    this.authors.clear();
-    this.renderSide();
-    this.renderMain();
   }
 
   // ---- main area ---------------------------------------------------------
 
-  private scoped(): LibraryItem[] {
-    return this.items.filter((i) => inCategory(i, this.category));
+  private title(): string {
+    if (this.category) return this.category.split("/").pop() ?? "";
+    if (this.mode === "recent") return "Recent";
+    if (this.mode === "reading") return "Reading list";
+    return "My Library";
   }
 
   private renderMain() {
     const main = this.mainEl;
     main.empty();
 
-    const scoped = this.scoped();
-    const name = this.category ? this.category.split("/").pop() : "Library";
+    this.renderBreadcrumb(main);
+
     const head = main.createDiv({ cls: "fel-head" });
-    if (this.category) {
-      const dot = head.createSpan({ cls: "fel-dot fel-dot-lg" });
-      dot.style.backgroundColor = this.color(this.category);
+    head.createEl("h1", { text: this.title() });
+    const desc = this.category ? this.descriptions[this.category] : undefined;
+    if (desc) main.createEl("p", { cls: "fel-desc", text: desc });
+
+    this.renderTabs(main);
+    this.bodyEl = main.createDiv({ cls: "fel-tab-body" });
+    this.renderTabBody();
+  }
+
+  private renderBreadcrumb(parent: HTMLElement) {
+    const bc = parent.createDiv({ cls: "fel-crumbs" });
+    const root = bc.createSpan({ cls: "fel-crumb", text: "My Library" });
+    root.addEventListener("click", () => this.go(null));
+    if (!this.category) return;
+
+    const segs = this.category.split("/");
+    segs.forEach((seg, i) => {
+      bc.createSpan({ cls: "fel-crumb-sep", text: "/" });
+      const key = segs.slice(0, i + 1).join("/");
+      const crumb = bc.createSpan({ cls: "fel-crumb" });
+      if (i === segs.length - 1) {
+        const dot = crumb.createSpan({ cls: "fel-dot" });
+        dot.style.backgroundColor = this.color(key);
+      }
+      crumb.createSpan({ text: seg });
+      crumb.addEventListener("click", () => this.go(key));
+    });
+  }
+
+  private renderTabs(parent: HTMLElement) {
+    const tabs = parent.createDiv({ cls: "fel-tabs" });
+    TABS.forEach((t) => {
+      const el = tabs.createDiv({ cls: "fel-tab" + (this.tab === t.id ? " is-active" : "") });
+      setIcon(el.createSpan({ cls: "fel-tab-icon" }), t.icon);
+      el.createSpan({ text: t.label });
+      el.addEventListener("click", () => {
+        this.tab = t.id;
+        this.renderMain();
+      });
+    });
+  }
+
+  private renderTabBody() {
+    this.bodyEl.empty();
+    if (this.tab === "canvases") {
+      this.renderCanvases();
+      return;
     }
-    head.createEl("h1", { text: name });
 
-    this.renderAuthors(main, scoped);
+    const scoped = this.scoped();
+    this.renderAuthors(this.bodyEl, scoped);
 
-    const bar = main.createDiv({ cls: "fel-bar" });
+    const bar = this.bodyEl.createDiv({ cls: "fel-bar" });
     this.countEl = bar.createSpan({ cls: "fel-total" });
+
+    const add = bar.createEl("button", { cls: "fel-btn" });
+    setIcon(add.createSpan(), "plus");
+    add.createSpan({ text: "Add" });
+    add.addEventListener("click", () => this.addItem());
 
     const search = bar.createEl("input", {
       cls: "fel-search",
@@ -150,7 +253,7 @@ export class LibraryView extends ItemView {
       this.renderGrid();
     });
 
-    const select = bar.createEl("select", { cls: "dropdown" });
+    const select = bar.createEl("select", { cls: "dropdown fel-sort" });
     (Object.keys(SORT_LABELS) as SortKey[]).forEach((key) => {
       const opt = select.createEl("option", { value: key, text: SORT_LABELS[key] });
       opt.selected = key === this.sort;
@@ -160,8 +263,19 @@ export class LibraryView extends ItemView {
       this.renderGrid();
     });
 
-    this.gridEl = main.createDiv({ cls: "fel-grid" });
+    this.bodyEl.createDiv({ cls: "fel-grid" });
     this.renderGrid();
+  }
+
+  private scoped(): LibraryItem[] {
+    const kind = this.tab === "notebooks" ? "notebook" : "item";
+    return this.items.filter((i) => {
+      if (i.kind !== kind) return false;
+      if (this.mode === "reading") {
+        return i.progress !== undefined && i.progress > 0 && i.progress < 1;
+      }
+      return inCategory(i, this.category);
+    });
   }
 
   private renderAuthors(parent: HTMLElement, scoped: LibraryItem[]) {
@@ -171,7 +285,10 @@ export class LibraryView extends ItemView {
     );
     if (counts.size === 0) return;
 
-    parent.createDiv({ cls: "fel-section", text: "Authors" });
+    const label = parent.createDiv({ cls: "fel-section" });
+    label.createSpan({ text: "Authors" });
+    label.createDiv({ cls: "fel-rule" });
+
     const wrap = parent.createDiv({ cls: "fel-chips" });
     [...counts.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -185,7 +302,7 @@ export class LibraryView extends ItemView {
         chip.addEventListener("click", () => {
           if (this.authors.has(author)) this.authors.delete(author);
           else this.authors.add(author);
-          this.renderMain();
+          this.renderTabBody();
         });
       });
   }
@@ -207,30 +324,33 @@ export class LibraryView extends ItemView {
       year: (a, b) => (b.year ?? 0) - (a.year ?? 0),
       progress: (a, b) => (b.progress ?? -1) - (a.progress ?? -1),
     };
-    return list.sort(cmp[this.sort]);
+    const sorted = list.sort(cmp[this.sort]);
+    return this.mode === "recent" ? sorted.slice(0, 24) : sorted;
   }
 
   private renderGrid() {
+    const grid = this.bodyEl.querySelector<HTMLElement>(".fel-grid");
+    if (!grid) return;
     const list = this.visible();
-    this.countEl.setText(`Items (${list.length})`);
-    this.gridEl.empty();
+    this.countEl.setText(`${this.tab === "notebooks" ? "Notebooks" : "Items"} (${list.length})`);
+    grid.empty();
 
     if (list.length === 0) {
-      const empty = this.gridEl.createDiv({ cls: "fel-empty" });
-      empty.createDiv({
+      grid.createDiv({
+        cls: "fel-empty",
         text:
           this.items.length === 0
             ? "No items yet. Add a category property to a note to see it here."
-            : "No items match the current filters.",
+            : "Nothing here yet.",
       });
       return;
     }
-    list.forEach((item) => this.renderCard(item));
+    list.forEach((item) => this.renderCard(grid, item));
   }
 
-  private renderCard(item: LibraryItem) {
+  private renderCard(grid: HTMLElement, item: LibraryItem) {
     const key = categoryKey(item.category);
-    const card = this.gridEl.createDiv({ cls: "fel-card" });
+    const card = grid.createDiv({ cls: "fel-card" });
     card.style.setProperty("--fel-cat", this.color(key));
 
     const top = card.createDiv({ cls: "fel-card-top" });
@@ -244,48 +364,60 @@ export class LibraryView extends ItemView {
 
     const foot = card.createDiv({ cls: "fel-card-foot" });
     const notes = foot.createSpan({ cls: "fel-notes" });
-    notes.setText(`${item.notes} ${item.notes === 1 ? "note" : "notes"}`);
+    setIcon(notes.createSpan({ cls: "fel-notes-icon" }), "message-square");
+    notes.createSpan({ text: String(item.notes) });
     if (item.pages) {
       foot.createSpan({
         cls: "fel-pages",
         text: `${item.currentPage ?? 0}/${item.pages} p.`,
       });
     }
-    this.renderRing(foot, item.progress);
+    renderRing(foot, item.progress);
 
     card.addEventListener("click", (evt) => {
-      const file = this.app.vault.getFileByPath(item.path);
-      if (file) {
-        this.app.workspace.getLeaf(Keymap.isModEvent(evt)).openFile(file);
-      }
+      this.plugin.openReader(item.path, Keymap.isModEvent(evt) ? "tab" : this.leaf);
     });
   }
 
-  private renderRing(parent: HTMLElement, progress?: number) {
-    const size = 22;
-    const r = 8;
-    const circ = 2 * Math.PI * r;
-    const svg = parent.createSvg("svg", {
-      cls: "fel-ring",
-      attr: { width: size, height: size, viewBox: `0 0 ${size} ${size}` },
-    });
-    svg.createSvg("circle", {
-      cls: "fel-ring-bg",
-      attr: { cx: size / 2, cy: size / 2, r, fill: "none", "stroke-width": 3 },
-    });
-    if (progress !== undefined && progress > 0) {
-      svg.createSvg("circle", {
-        cls: "fel-ring-fg",
-        attr: {
-          cx: size / 2,
-          cy: size / 2,
-          r,
-          fill: "none",
-          "stroke-width": 3,
-          "stroke-dasharray": `${circ * progress} ${circ}`,
-          transform: `rotate(-90 ${size / 2} ${size / 2})`,
-        },
-      });
+  private renderCanvases() {
+    const needle = this.category?.split("/").pop()?.toLowerCase();
+    const files = this.app.vault
+      .getFiles()
+      .filter((f) => f.extension === "canvas")
+      .filter((f) => !needle || f.path.toLowerCase().includes(needle));
+
+    const list = this.bodyEl.createDiv({ cls: "fel-rows" });
+    if (files.length === 0) {
+      list.createDiv({ cls: "fel-empty", text: "No canvases here yet." });
+      return;
     }
+    files.forEach((file) => {
+      const row = list.createDiv({ cls: "fel-row" });
+      setIcon(row.createSpan(), "layout-dashboard");
+      row.createSpan({ text: file.basename });
+      row.addEventListener("click", (evt) => {
+        this.app.workspace.getLeaf(Keymap.isModEvent(evt)).openFile(file);
+      });
+    });
+  }
+
+  private async addItem() {
+    const folder = "Library";
+    if (!this.app.vault.getFolderByPath(folder)) {
+      await this.app.vault.createFolder(folder);
+    }
+    let n = 1;
+    let path = "";
+    do {
+      path = `${folder}/Untitled ${n++}.md`;
+    } while (this.app.vault.getAbstractFileByPath(path));
+
+    const category = this.category ?? "Uncategorized";
+    const type = this.tab === "notebooks" ? "type: notebook\n" : "";
+    const body =
+      `---\n${type}authors: []\nyear: ${new Date().getFullYear()}\n` +
+      `category: ${category}\npages: \ncurrent_page: 0\n---\n\n`;
+    const file = await this.app.vault.create(path, body);
+    await this.app.workspace.getLeaf(true).openFile(file);
   }
 }

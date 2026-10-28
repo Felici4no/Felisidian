@@ -6,6 +6,8 @@ export interface FelisidianSettings {
   accentColor: string;
   fontSize: number;
   radius: number;
+  /** Per-category color overrides, keyed by category path. */
+  categoryColors: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: FelisidianSettings = {
@@ -13,6 +15,7 @@ export const DEFAULT_SETTINGS: FelisidianSettings = {
   accentColor: "#7c5cff",
   fontSize: 16,
   radius: 8,
+  categoryColors: {},
 };
 
 export class FelisidianSettingTab extends PluginSettingTab {

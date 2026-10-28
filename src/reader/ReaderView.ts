@@ -10,8 +10,8 @@ import {
   setIcon,
 } from "obsidian";
 import type FelisidianPlugin from "../main";
-import { categoryColor } from "../library/colors";
-import { renderRing } from "../library/ui";
+import { PALETTE, categoryColor, colorKeyFor, toHex } from "../library/colors";
+import { renderRing, renderSwatches } from "../library/ui";
 
 export const VIEW_TYPE_READER = "felisidian-reader";
 
@@ -50,6 +50,10 @@ export class ReaderView extends ItemView {
 
   getIcon() {
     return "book-open";
+  }
+
+  rerender() {
+    return this.render();
   }
 
   getState() {
@@ -103,10 +107,15 @@ export class ReaderView extends ItemView {
     const title = typeof fm.title === "string" && fm.title ? fm.title : file.basename;
     const pages = Number(fm.pages) > 0 ? Number(fm.pages) : undefined;
     const current = Number(fm.current_page) || 0;
-    const color = categoryColor(catPath.join("/"), this.plugin.settings.categoryColors);
+    const catKey = catPath.join("/");
+    const overrides = this.plugin.settings.categoryColors;
+    const color = toHex(typeof fm.color === "string" ? fm.color : undefined) ?? categoryColor(catKey, overrides);
+    const colorKey =
+      typeof fm.color === "string" && PALETTE[fm.color] ? fm.color : colorKeyFor(catKey, overrides);
 
+    // The whole page takes the note's pastel color.
+    this.containerEl.style.setProperty("--fel-cat", color);
     const page = root.createDiv({ cls: "fel-reader-page" });
-    page.style.setProperty("--fel-cat", color);
 
     this.renderCrumbs(page, catPath, title);
 
@@ -120,6 +129,16 @@ export class ReaderView extends ItemView {
     if (catPath.length) meta.createSpan({ cls: "fel-reader-cat", text: catPath[catPath.length - 1] });
 
     this.renderProgress(meta, file, current, pages);
+
+    renderSwatches(
+      meta,
+      colorKey,
+      (key) =>
+        this.app.fileManager.processFrontMatter(file, (f) => {
+          f.color = key;
+        }),
+      true
+    );
 
     const edit = meta.createEl("button", { cls: "fel-btn fel-edit" });
     setIcon(edit.createSpan(), "pencil");

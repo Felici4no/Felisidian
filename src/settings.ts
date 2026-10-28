@@ -8,6 +8,10 @@ export interface FelisidianSettings {
   radius: number;
   /** Per-category color overrides, keyed by category path. */
   categoryColors: Record<string, string>;
+  /** Tags created from the "New tag" window (may have no notes yet). */
+  customCategories: string[];
+  /** Tint opened notes with their color. */
+  tintNotes: boolean;
 }
 
 export const DEFAULT_SETTINGS: FelisidianSettings = {
@@ -16,6 +20,8 @@ export const DEFAULT_SETTINGS: FelisidianSettings = {
   fontSize: 16,
   radius: 8,
   categoryColors: {},
+  customCategories: [],
+  tintNotes: true,
 };
 
 export class FelisidianSettingTab extends PluginSettingTab {
@@ -33,6 +39,16 @@ export class FelisidianSettingTab extends PluginSettingTab {
       .addToggle((t) =>
         t.setValue(this.plugin.settings.enabled).onChange(async (v) => {
           this.plugin.settings.enabled = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Tint notes with their color")
+      .setDesc("Opened notes get a pastel background from their color property or category.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.tintNotes).onChange(async (v) => {
+          this.plugin.settings.tintNotes = v;
           await this.plugin.saveSettings();
         })
       );

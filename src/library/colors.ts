@@ -1,17 +1,20 @@
-const PALETTE = [
-  "#a855f7", // purple
-  "#e0b93a", // yellow
-  "#3b82f6", // blue
-  "#84cc16", // lime
-  "#f97316", // orange
-  "#14b8a6", // teal
-  "#ec4899", // pink
-  "#22c55e", // green
-  "#ef4444", // red
-  "#6366f1", // indigo
-  "#a16207", // brown
-  "#64748b", // slate
-];
+/** Base colors; cards, notes and pages are tinted from these (pastel via CSS). */
+export const PALETTE: Record<string, string> = {
+  purple: "#a77bdc",
+  yellow: "#e6c84f",
+  blue: "#5b8fe0",
+  lime: "#8fcf4a",
+  orange: "#f09a52",
+  teal: "#3fc0a8",
+  pink: "#ec6fa6",
+  green: "#52bd6f",
+  red: "#ea6a6a",
+  indigo: "#7c7ce8",
+  brown: "#a9794c",
+  slate: "#8a97a8",
+};
+
+export const PALETTE_KEYS = Object.keys(PALETTE);
 
 function hash(text: string): number {
   let h = 0;
@@ -19,10 +22,20 @@ function hash(text: string): number {
   return h;
 }
 
-/** Stable color per category path; user overrides win. */
-export function categoryColor(
-  path: string,
-  overrides: Record<string, string>
-): string {
-  return overrides[path] ?? PALETTE[hash(path) % PALETTE.length];
+/** Accepts a palette key ("pink") or a hex color; anything else is undefined. */
+export function toHex(value?: string): string | undefined {
+  if (!value) return undefined;
+  if (PALETTE[value]) return PALETTE[value];
+  return /^#[0-9a-f]{3,8}$/i.test(value) ? value : undefined;
+}
+
+/** Palette key for a category: the user's choice, else stable per path. */
+export function colorKeyFor(path: string, overrides: Record<string, string>): string {
+  const chosen = overrides[path];
+  if (chosen && PALETTE[chosen]) return chosen;
+  return PALETTE_KEYS[hash(path) % PALETTE_KEYS.length];
+}
+
+export function categoryColor(path: string, overrides: Record<string, string>): string {
+  return toHex(overrides[path]) ?? PALETTE[colorKeyFor(path, overrides)];
 }

@@ -15,6 +15,8 @@ export interface LibraryItem {
   progress?: number;
   notes: number;
   mtime: number;
+  /** Palette key or hex from the note's `color` property. */
+  color?: string;
 }
 
 export interface CategoryNode {
@@ -72,6 +74,7 @@ export function collectItems(app: App): LibraryItem[] {
       progress,
       notes: backlinks.get(file.path) ?? 0,
       mtime: file.stat.mtime,
+      color: typeof fm.color === "string" ? fm.color : undefined,
     });
   }
   return items;
@@ -92,6 +95,11 @@ export function collectCategoryDescriptions(app: App): Record<string, string> {
   return out;
 }
 
+/** Every category path in the tree, parents before children. */
+export function flattenTree(nodes: CategoryNode[]): string[] {
+  return nodes.flatMap((n) => [n.path, ...flattenTree(n.children)]);
+}
+
 export function categoryKey(path: string[]): string {
   return path.join(SEP);
 }
@@ -102,22 +110,28 @@ export function inCategory(item: LibraryItem, key: string | null): boolean {
   return own === key || own.startsWith(key + SEP);
 }
 
-/** Builds the category tree; a parent's count includes its children. */
-export function buildTree(items: LibraryItem[]): CategoryNode[] {
+/**
+ * Builds the category tree; a parent's count includes its children.
+ * `extra` are category paths created by the user that may have no items yet.
+ */
+export function buildTree(items: LibraryItem[], extra: string[] = []): CategoryNode[] {
   const roots: CategoryNode[] = [];
-  for (const item of items) {
+  const add = (segments: string[], counts: boolean) => {
     let level = roots;
-    item.category.forEach((name, i) => {
-      const path = categoryKey(item.category.slice(0, i + 1));
+    segments.forEach((name, i) => {
+      const path = categoryKey(segments.slice(0, i + 1));
       let node = level.find((n) => n.path === path);
       if (!node) {
         node = { name, path, count: 0, children: [] };
         level.push(node);
       }
-      node.count++;
+      if (counts) node.count++;
       level = node.children;
     });
-  }
+  };
+  items.forEach((item) => add(item.category, true));
+  extra.forEach((p) => add(p.split(SEP).map((s) => s.trim()).filter(Boolean), false));
+
   const sort = (nodes: CategoryNode[]) => {
     nodes.sort((a, b) => a.name.localeCompare(b.name));
     nodes.forEach((n) => sort(n.children));

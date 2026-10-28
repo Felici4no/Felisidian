@@ -7,7 +7,8 @@ import {
   setIcon,
 } from "obsidian";
 import type FelisidianPlugin from "../main";
-import { categoryColor } from "./colors";
+import { NewNoteModal, NewTagModal } from "../ui/modals";
+import { categoryColor, toHex } from "./colors";
 import {
   CategoryNode,
   LibraryItem,
@@ -15,6 +16,7 @@ import {
   categoryKey,
   collectCategoryDescriptions,
   collectItems,
+  flattenTree,
   inCategory,
 } from "./model";
 import { renderRing } from "./ui";
@@ -100,10 +102,15 @@ export class LibraryView extends ItemView {
     return categoryColor(path, this.plugin.settings.categoryColors);
   }
 
-  private refresh() {
+  private categoryPaths(): string[] {
+    const own = this.items.filter((i) => i.kind === "item");
+    return flattenTree(buildTree(own, this.plugin.settings.customCategories));
+  }
+
+  refresh() {
     this.items = collectItems(this.app);
     this.descriptions = collectCategoryDescriptions(this.app);
-    if (this.category && !this.items.some((i) => inCategory(i, this.category))) {
+    if (this.category && !this.categoryPaths().includes(this.category)) {
       this.category = null;
     }
     this.renderSide();
@@ -150,7 +157,16 @@ export class LibraryView extends ItemView {
 
     const tree = side.createDiv({ cls: "fel-tree" });
     const own = this.items.filter((i) => i.kind === "item");
-    buildTree(own).forEach((node) => this.renderNode(tree, node, 0));
+    buildTree(own, this.plugin.settings.customCategories).forEach((node) =>
+      this.renderNode(tree, node, 0)
+    );
+
+    const add = side.createDiv({ cls: "fel-side-add", text: "New tag +" });
+    add.addEventListener("click", () => {
+      new NewTagModal(this.app, this.plugin, this.categoryPaths(), this.category, (path) =>
+        this.go(path)
+      ).open();
+    });
   }
 
   private renderNode(parent: HTMLElement, node: CategoryNode, depth: number) {
@@ -351,7 +367,7 @@ export class LibraryView extends ItemView {
   private renderCard(grid: HTMLElement, item: LibraryItem) {
     const key = categoryKey(item.category);
     const card = grid.createDiv({ cls: "fel-card" });
-    card.style.setProperty("--fel-cat", this.color(key));
+    card.style.setProperty("--fel-cat", toHex(item.color) ?? this.color(key));
 
     const top = card.createDiv({ cls: "fel-card-top" });
     if (item.year) top.createSpan({ cls: "fel-badge", text: String(item.year) });
@@ -401,23 +417,13 @@ export class LibraryView extends ItemView {
     });
   }
 
-  private async addItem() {
-    const folder = "Library";
-    if (!this.app.vault.getFolderByPath(folder)) {
-      await this.app.vault.createFolder(folder);
-    }
-    let n = 1;
-    let path = "";
-    do {
-      path = `${folder}/Untitled ${n++}.md`;
-    } while (this.app.vault.getAbstractFileByPath(path));
-
-    const category = this.category ?? "Uncategorized";
-    const type = this.tab === "notebooks" ? "type: notebook\n" : "";
-    const body =
-      `---\n${type}authors: []\nyear: ${new Date().getFullYear()}\n` +
-      `category: ${category}\npages: \ncurrent_page: 0\n---\n\n`;
-    const file = await this.app.vault.create(path, body);
-    await this.app.workspace.getLeaf(true).openFile(file);
+  private addItem() {
+    new NewNoteModal(
+      this.app,
+      this.plugin,
+      this.categoryPaths(),
+      this.category,
+      this.tab === "notebooks"
+    ).open();
   }
 }

@@ -21,19 +21,22 @@ body.felisidian .cm-s-obsidian .HyperMD-codeblock {
 
 /* ---- Shared tokens: warm paper palette ------------------------------- */
 
+.workspace-leaf-content[data-type="felisidian-library"],
+.workspace-leaf-content[data-type="felisidian-reader"],
 .fel-lib,
 .fel-reader {
   --fel-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
-  --fel-paper: #f8f1e5;
-  --fel-paper-2: #eee2cf;
-  --fel-paper-3: #e3d3ba;
+  --fel-paper: #f7f0e6;
+  --fel-paper-2: #efe4d3;
+  --fel-paper-3: #e8dac5;
   --fel-ink: #3b2f25;
   --fel-ink-2: #7a6a5a;
-  --fel-line: #e0d2bb;
-  background: var(--fel-paper);
+  --fel-line: #e4d7c1;
   color: var(--fel-ink);
 }
 
+.theme-dark .workspace-leaf-content[data-type="felisidian-library"],
+.theme-dark .workspace-leaf-content[data-type="felisidian-reader"],
 .theme-dark .fel-lib,
 .theme-dark .fel-reader {
   --fel-paper: #231e19;
@@ -307,8 +310,8 @@ body.felisidian .cm-s-obsidian .HyperMD-codeblock {
   min-height: 230px;
   padding: 16px;
   border-radius: 22px;
-  border: 1px solid color-mix(in srgb, var(--fel-cat) 60%, transparent);
-  background: color-mix(in srgb, var(--fel-cat) 34%, var(--fel-paper));
+  border: 1px solid color-mix(in srgb, var(--fel-cat) 45%, transparent);
+  background: color-mix(in srgb, var(--fel-cat) 27%, var(--fel-paper));
   color: var(--fel-ink);
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
@@ -458,7 +461,7 @@ body.felisidian .cm-s-obsidian .HyperMD-codeblock {
 .fel-reader-cat {
   padding: 2px 12px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--fel-cat) 34%, var(--fel-paper));
+  background: color-mix(in srgb, var(--fel-cat) 27%, var(--fel-paper));
   color: var(--fel-ink);
 }
 
@@ -533,4 +536,122 @@ body.felisidian .cm-s-obsidian .HyperMD-codeblock {
   .fel-reader-page {
     padding: 16px 16px 60px;
   }
+}
+
+/* ---- Colors: pastel pages, swatches, tag window ---------------------- */
+
+body .workspace-leaf.mod-active .workspace-leaf-content[data-type="felisidian-library"] > .view-header,
+body .workspace-leaf-content[data-type="felisidian-library"] > .view-header,
+.workspace-leaf-content[data-type="felisidian-library"] > .view-content {
+  background: var(--fel-paper);
+}
+
+/* The reader page takes the note's pastel color. */
+body .workspace-leaf.mod-active .workspace-leaf-content[data-type="felisidian-reader"] > .view-header,
+body .workspace-leaf-content[data-type="felisidian-reader"] > .view-header,
+.workspace-leaf-content[data-type="felisidian-reader"] > .view-content {
+  background: color-mix(in srgb, var(--fel-cat, #c9b99f) 22%, var(--fel-paper));
+}
+
+.fel-reader-hint,
+.fel-reader-hint + .fel-reader-body {
+  --fel-paper-2: color-mix(in srgb, var(--fel-cat) 30%, var(--fel-paper));
+}
+
+/* Opened notes in the normal editor get a tint too. */
+.workspace-leaf-content.fel-tinted-note,
+body .workspace-leaf-content.fel-tinted-note > .view-header,
+body .workspace-leaf.mod-active .workspace-leaf-content.fel-tinted-note > .view-header,
+.workspace-leaf-content.fel-tinted-note > .view-content {
+  --fel-note-bg: color-mix(in srgb, var(--fel-note) 18%, var(--background-primary));
+  background-color: var(--fel-note-bg);
+}
+
+.workspace-leaf-content.fel-tinted-note .markdown-source-view,
+.workspace-leaf-content.fel-tinted-note .markdown-preview-view,
+.workspace-leaf-content.fel-tinted-note .cm-editor {
+  background-color: transparent;
+}
+
+.fel-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fel-swatch {
+  --sw: #c9b99f;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--sw) 45%, white);
+  box-shadow: inset 0 0 0 5px color-mix(in srgb, var(--sw) 45%, white), inset 0 0 0 20px var(--sw);
+  cursor: pointer;
+}
+
+.fel-swatch:hover {
+  transform: scale(1.12);
+}
+
+.fel-swatch.is-selected {
+  border-color: var(--text-normal);
+}
+
+.fel-swatches.is-small {
+  gap: 5px;
+  margin-left: 4px;
+}
+
+.fel-swatches.is-small .fel-swatch {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+  box-shadow: none;
+  background: var(--sw);
+}
+
+.fel-preview {
+  margin: 8px 0 16px;
+}
+
+.fel-preview-card {
+  --fel-paper: #f7f0e6;
+  --fel-ink: #3b2f25;
+  --fel-ink-2: #7a6a5a;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--fel-cat) 45%, transparent);
+  background: color-mix(in srgb, var(--fel-cat) 27%, var(--fel-paper));
+  color: var(--fel-ink);
+}
+
+.fel-preview-card .fel-card-top {
+  color: var(--fel-ink-2);
+  font-size: var(--font-ui-small);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.fel-preview-card .fel-badge {
+  background: color-mix(in srgb, var(--fel-cat) 20%, var(--fel-paper));
+}
+
+.fel-preview-card .fel-card-title {
+  font-family: Georgia, serif;
+  font-weight: 600;
+}
+
+.fel-side-add {
+  margin: 14px 8px 0;
+  color: var(--fel-ink-2);
+  cursor: pointer;
+}
+
+.fel-side-add:hover {
+  color: var(--fel-ink);
 }

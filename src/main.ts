@@ -1,6 +1,9 @@
-import { Plugin, WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { categoryColor, toHex } from "./library/colors";
 import { LibraryView, VIEW_TYPE_LIBRARY } from "./library/LibraryView";
+import { buildTree, collectItems, flattenTree } from "./library/model";
 import { ReaderView, VIEW_TYPE_READER } from "./reader/ReaderView";
+import { NewNoteModal, NewTagModal } from "./ui/modals";
 import {
   DEFAULT_SETTINGS,
   FelisidianSettings,
@@ -37,6 +40,18 @@ export default class FelisidianPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "new-tag",
+      name: "New tag",
+      callback: () => new NewTagModal(this.app, this, this.categoryPaths(), null).open(),
+    });
+
+    this.addCommand({
+      id: "new-note",
+      name: "New library note",
+      callback: () => new NewNoteModal(this.app, this, this.categoryPaths(), null, false).open(),
+    });
+
+    this.addCommand({
       id: "toggle-styles",
       name: "Toggle styles",
       callback: async () => {
@@ -46,10 +61,70 @@ export default class FelisidianPlugin extends Plugin {
     });
 
     applyTheme(this.settings);
+
+    const tint = () => this.tintNotes();
+    this.registerEvent(this.app.workspace.on("file-open", tint));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", tint));
+    this.registerEvent(this.app.workspace.on("layout-change", tint));
+    this.registerEvent(this.app.metadataCache.on("changed", tint));
+    this.app.workspace.onLayoutReady(tint);
   }
 
   onunload() {
     clearTheme();
+    this.clearTint();
+  }
+
+  categoryPaths(): string[] {
+    const items = collectItems(this.app).filter((i) => i.kind === "item");
+    return flattenTree(buildTree(items, this.settings.customCategories));
+  }
+
+  /** The note's own color, else the color of its category. */
+  noteColor(file: TFile): string | undefined {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    if (!fm) return undefined;
+    const own = toHex(typeof fm.color === "string" ? fm.color : undefined);
+    if (own) return own;
+
+    const raw = Array.isArray(fm.category) ? fm.category[0] : fm.category;
+    if (!raw) return undefined;
+    const path = String(raw).split("/").map((s) => s.trim()).filter(Boolean).join("/");
+    return categoryColor(path, this.settings.categoryColors);
+  }
+
+  /** Gives opened Markdown notes a pastel background from their color. */
+  tintNotes() {
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView)) return;
+      const el = view.containerEl;
+      const color = this.settings.tintNotes && view.file ? this.noteColor(view.file) : undefined;
+      if (color) {
+        el.style.setProperty("--fel-note", color);
+        el.addClass("fel-tinted-note");
+      } else {
+        el.style.removeProperty("--fel-note");
+        el.removeClass("fel-tinted-note");
+      }
+    });
+  }
+
+  private clearTint() {
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (!(leaf.view instanceof MarkdownView)) return;
+      leaf.view.containerEl.style.removeProperty("--fel-note");
+      leaf.view.containerEl.removeClass("fel-tinted-note");
+    });
+  }
+
+  refreshViews() {
+    this.app.workspace.getLeavesOfType(VIEW_TYPE_LIBRARY).forEach((leaf) => {
+      if (leaf.view instanceof LibraryView) leaf.view.refresh();
+    });
+    this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).forEach((leaf) => {
+      if (leaf.view instanceof ReaderView) leaf.view.rerender();
+    });
   }
 
   /** Opens the library, optionally on a category and in a given leaf. */
@@ -81,5 +156,7 @@ export default class FelisidianPlugin extends Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
     applyTheme(this.settings);
+    this.tintNotes();
+    this.refreshViews();
   }
 }

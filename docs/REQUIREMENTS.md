@@ -1,6 +1,6 @@
 # Requisitos — Biblioteca visual para Obsidian
 
-Referência visual: `docs/reference/library-reference.webp`
+Referência visual: `assets/images/reference/library-reference.webp`
 
 Visão: **uma biblioteca** dentro do Obsidian, com **tags/categorias vistas de forma diferente**, **cards de pré-visualização**, **páginas**, **círculos de cor por categoria** e metadados (nº de páginas etc.).
 

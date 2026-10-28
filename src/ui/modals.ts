@@ -152,7 +152,7 @@ export class NewNoteModal extends Modal {
 
     const colorRow = new Setting(contentEl)
       .setName("Color")
-      .setDesc("The note opens tinted with this color.");
+      .setDesc("Defaults to the tag's color. Tag colors are changed in the plugin settings.");
     this.setSwatch = renderSwatches(colorRow.controlEl, this.color, (k) => {
       this.color = k;
       this.colorTouched = true;
@@ -179,7 +179,11 @@ export class NewNoteModal extends Modal {
     if (Number.isFinite(year) && year > 0) lines.push(`year: ${year}`);
     lines.push(`category: ${quote(this.category)}`);
     if (!this.notebook && pages > 0) lines.push(`pages: ${pages}`, "current_page: 0");
-    lines.push(`color: ${this.color}`, "---", "", "");
+    // Only store a color when it differs from the tag's; otherwise the note
+    // follows its tag, whose color is edited in the plugin settings.
+    const tagKey = colorKeyFor(this.category, this.plugin.settings.categoryColors);
+    if (this.colorTouched && this.color !== tagKey) lines.push(`color: ${this.color}`);
+    lines.push("---", "", "");
 
     const folder = "Library";
     if (!this.app.vault.getFolderByPath(folder)) await this.app.vault.createFolder(folder);

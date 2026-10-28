@@ -14,9 +14,21 @@ body.felisidian .callout {
   border-radius: var(--radius-m);
 }
 
-body.felisidian .markdown-rendered pre,
-body.felisidian .cm-s-obsidian .HyperMD-codeblock {
+body.felisidian .markdown-rendered pre {
   border-radius: var(--radius-m);
+}
+
+/* Editor code blocks are one element per line: round only the ends. */
+body.felisidian .cm-s-obsidian .HyperMD-codeblock {
+  border-radius: 0;
+}
+
+body.felisidian .cm-s-obsidian .HyperMD-codeblock-begin {
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+}
+
+body.felisidian .cm-s-obsidian .HyperMD-codeblock-end {
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
 }
 
 /* ---- Shared tokens: warm paper palette ------------------------------- */
@@ -25,7 +37,7 @@ body.felisidian .cm-s-obsidian .HyperMD-codeblock {
 .workspace-leaf-content[data-type="felisidian-reader"],
 .fel-lib,
 .fel-reader {
-  --fel-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --fel-serif: var(--fel-font, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif);
   --fel-paper: #f7f0e6;
   --fel-paper-2: #efe4d3;
   --fel-paper-3: #e8dac5;
@@ -57,6 +69,7 @@ body.felisidian .cm-s-obsidian .HyperMD-codeblock {
 }
 
 .fel-side {
+  position: relative;
   flex: 0 0 250px;
   padding: 18px 12px;
   overflow-y: auto;
@@ -88,7 +101,6 @@ body.felisidian .cm-s-obsidian .HyperMD-codeblock {
 }
 
 .fel-side-link.is-active {
-  background: var(--fel-paper-3);
   color: var(--fel-ink);
   font-weight: 600;
 }
@@ -654,4 +666,216 @@ body .workspace-leaf.mod-active .workspace-leaf-content.fel-tinted-note > .view-
 
 .fel-side-add:hover {
   color: var(--fel-ink);
+}
+
+/* ---- Motion: sliding selection, card reflow, collapse, drag --------- */
+
+.fel-side-list {
+  position: relative;
+  z-index: 1;
+}
+
+.fel-side-link {
+  position: relative;
+}
+
+.fel-side-heading.is-active {
+  color: var(--fel-ink);
+}
+
+/* One highlight that glides between sidebar rows. */
+.fel-indicator {
+  --ind: #b8a88f;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--ind) 30%, var(--fel-paper));
+  pointer-events: none;
+}
+
+.fel-indicator.is-hidden {
+  opacity: 0;
+}
+
+.fel-indicator.is-ready {
+  transition:
+    transform 380ms cubic-bezier(0.3, 0.9, 0.3, 1),
+    height 380ms cubic-bezier(0.3, 0.9, 0.3, 1),
+    width 380ms cubic-bezier(0.3, 0.9, 0.3, 1),
+    background-color 380ms ease;
+}
+
+/* Filtered-out cards fade away before the rest reflow. */
+.fel-card {
+  will-change: transform;
+}
+
+.fel-card.is-leaving {
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 170ms ease, transform 170ms ease;
+}
+
+.fel-card.is-dragging {
+  opacity: 0.45;
+  transform: scale(0.97);
+}
+
+.fel-card[draggable="true"] {
+  cursor: grab;
+}
+
+/* Collapsible Authors section. */
+.fel-section[role="button"] {
+  cursor: pointer;
+  user-select: none;
+}
+
+.fel-chev {
+  display: inline-flex;
+  transition: transform 250ms ease;
+  transform: rotate(-90deg);
+}
+
+.fel-chev.is-open {
+  transform: rotate(0);
+}
+
+.fel-chev .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.fel-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 300ms ease, opacity 250ms ease;
+}
+
+.fel-collapse.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.fel-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fel-indicator.is-ready,
+  .fel-chev,
+  .fel-collapse,
+  .fel-card.is-leaving {
+    transition: none;
+  }
+}
+
+/* ---- Back to library ------------------------------------------------- */
+
+.fel-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 3px 10px 3px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fel-cat) 25%, var(--fel-paper));
+  color: var(--fel-ink);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.fel-back:hover {
+  background: color-mix(in srgb, var(--fel-cat) 40%, var(--fel-paper));
+}
+
+.fel-back .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.fel-setting-dot {
+  margin-right: 8px;
+}
+
+/* ---- Fonts ----------------------------------------------------------- */
+
+body.fel-font-all {
+  --font-text: var(--fel-font), var(--font-text-theme);
+}
+
+/* ---- IDE-style code blocks ------------------------------------------- */
+
+body.fel-ide-code {
+  --code-background: #1e1e1e;
+  --code-normal: #d4d4d4;
+  --code-comment: #6a9955;
+  --code-function: #dcdcaa;
+  --code-keyword: #c586c0;
+  --code-string: #ce9178;
+  --code-important: #d7ba7d;
+  --code-operator: #d4d4d4;
+  --code-punctuation: #9a9a9a;
+  --code-property: #9cdcfe;
+  --code-tag: #569cd6;
+  --code-value: #b5cea8;
+  --font-monospace-theme: "Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, monospace;
+}
+
+body.fel-ide-code .markdown-rendered pre,
+body.fel-ide-code .markdown-source-view.mod-cm6 .cm-embed-block.markdown-rendered pre {
+  padding: 14px 16px;
+  border: 1px solid #333;
+  border-radius: var(--radius-m);
+  background: #1e1e1e;
+  color: #d4d4d4;
+  line-height: 1.55;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
+}
+
+body.fel-ide-code .markdown-rendered pre code {
+  background: transparent;
+  color: inherit;
+}
+
+/* Live preview / source mode code lines. */
+body.fel-ide-code .markdown-source-view.mod-cm6 .HyperMD-codeblock {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  line-height: 1.55;
+}
+
+body.fel-ide-code .markdown-source-view.mod-cm6 .HyperMD-codeblock-begin,
+body.fel-ide-code .markdown-source-view.mod-cm6 .HyperMD-codeblock-end {
+  color: #808080;
+}
+
+/* VS Code Dark+ token colors, reading view (Prism) and editor (CodeMirror). */
+body.fel-ide-code .markdown-rendered pre .token.keyword,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-keyword { color: #c586c0; }
+body.fel-ide-code .markdown-rendered pre .token.string,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-string { color: #ce9178; }
+body.fel-ide-code .markdown-rendered pre .token.comment,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-comment { color: #6a9955; font-style: italic; }
+body.fel-ide-code .markdown-rendered pre .token.function,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-def { color: #dcdcaa; }
+body.fel-ide-code .markdown-rendered pre .token.number,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-number { color: #b5cea8; }
+body.fel-ide-code .markdown-rendered pre .token.class-name,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-type { color: #4ec9b0; }
+body.fel-ide-code .markdown-rendered pre .token.operator,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-operator { color: #d4d4d4; }
+body.fel-ide-code .markdown-rendered pre .token.property,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-property,
+body.fel-ide-code .markdown-source-view .HyperMD-codeblock .cm-variable { color: #9cdcfe; }
+
+/* Inline code keeps the light page style. */
+body.fel-ide-code .markdown-rendered :not(pre) > code,
+body.fel-ide-code .cm-s-obsidian span.cm-inline-code {
+  --code-background: var(--background-modifier-hover);
+  --code-normal: var(--text-normal);
 }

@@ -23,3 +23,15 @@ The Transformer replaces recurrence with self-attention. Every token can look at
 Multi-head attention lets the model attend to information from different representation subspaces at different positions. Positional encodings inject the order of the sequence, since attention alone is permutation invariant.
 
 The architecture follows an encoder-decoder structure, and it became the foundation for models such as [[bert]] and [[gpt3]].
+
+## Code sample
+
+```python
+import math
+
+def scaled_dot_product(q, k, v):
+    """Core of self-attention."""
+    d = len(k[0])
+    scores = [[sum(a * b for a, b in zip(qi, kj)) / math.sqrt(d) for kj in k] for qi in q]
+    return scores  # softmax omitted
+```

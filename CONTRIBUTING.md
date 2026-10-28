@@ -22,4 +22,5 @@ npm run dev
 | `src/settings.ts` | Settings model and settings tab |
 | `src/theme.ts` | Applies settings as CSS variables |
 | `styles.css` | Plugin styles |
-| `docs/` | Requirements and visual reference |
+| `docs/` | Requirements |
+| `assets/images/` | **All** images (see its README); nothing else may hold images |

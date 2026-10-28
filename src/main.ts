@@ -13,6 +13,7 @@ import { applyTheme, clearTheme } from "./theme";
 
 export default class FelisidianPlugin extends Plugin {
   settings: FelisidianSettings;
+  private libraryActions = new Map<MarkdownView, HTMLElement>();
 
   async onload() {
     await this.loadSettings();
@@ -36,6 +37,15 @@ export default class FelisidianPlugin extends Plugin {
         if (!file) return false;
         if (!checking) this.openReader(file.path, this.app.workspace.getLeaf(false));
         return true;
+      },
+    });
+
+    this.addCommand({
+      id: "back-to-library",
+      name: "Back to library",
+      callback: () => {
+        const file = this.app.workspace.getActiveFile();
+        this.openLibrary(file ? this.categoryOf(file) : null);
       },
     });
 
@@ -80,17 +90,22 @@ export default class FelisidianPlugin extends Plugin {
     return flattenTree(buildTree(items, this.settings.customCategories));
   }
 
+  /** Category path of a note ("A/B"), or null when it has none. */
+  categoryOf(file: TFile): string | null {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const raw = Array.isArray(fm?.category) ? fm?.category[0] : fm?.category;
+    if (!raw) return null;
+    const path = String(raw).split("/").map((s) => s.trim()).filter(Boolean).join("/");
+    return path || null;
+  }
+
   /** The note's own color, else the color of its category. */
   noteColor(file: TFile): string | undefined {
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    if (!fm) return undefined;
-    const own = toHex(typeof fm.color === "string" ? fm.color : undefined);
+    const own = toHex(typeof fm?.color === "string" ? fm.color : undefined);
     if (own) return own;
-
-    const raw = Array.isArray(fm.category) ? fm.category[0] : fm.category;
-    if (!raw) return undefined;
-    const path = String(raw).split("/").map((s) => s.trim()).filter(Boolean).join("/");
-    return categoryColor(path, this.settings.categoryColors);
+    const category = this.categoryOf(file);
+    return category ? categoryColor(category, this.settings.categoryColors) : undefined;
   }
 
   /** Gives opened Markdown notes a pastel background from their color. */
@@ -99,6 +114,13 @@ export default class FelisidianPlugin extends Plugin {
       const view = leaf.view;
       if (!(view instanceof MarkdownView)) return;
       const el = view.containerEl;
+      if (!this.libraryActions.has(view)) {
+        const action = view.addAction("library", "Back to library", () => {
+          const f = view.file;
+          this.openLibrary(f ? this.categoryOf(f) : null, view.leaf);
+        });
+        this.libraryActions.set(view, action);
+      }
       const color = this.settings.tintNotes && view.file ? this.noteColor(view.file) : undefined;
       if (color) {
         el.style.setProperty("--fel-note", color);
@@ -111,6 +133,8 @@ export default class FelisidianPlugin extends Plugin {
   }
 
   private clearTint() {
+    this.libraryActions.forEach((el) => el.remove());
+    this.libraryActions.clear();
     this.app.workspace.iterateAllLeaves((leaf) => {
       if (!(leaf.view instanceof MarkdownView)) return;
       leaf.view.containerEl.style.removeProperty("--fel-note");

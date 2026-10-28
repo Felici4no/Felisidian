@@ -23,11 +23,12 @@ import { renderRing } from "./ui";
 
 export const VIEW_TYPE_LIBRARY = "felisidian-library";
 
-type SortKey = "recent" | "title" | "year" | "progress";
+type SortKey = "manual" | "recent" | "title" | "year" | "progress";
 type Tab = "items" | "notebooks" | "canvases";
 type Mode = "all" | "recent" | "reading";
 
 const SORT_LABELS: Record<SortKey, string> = {
+  manual: "Manual order",
   recent: "Recently accessed",
   title: "Title",
   year: "Year",
@@ -40,8 +41,17 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "canvases", label: "Canvases", icon: "layout-dashboard" },
 ];
 
+const LEAVE_MS = 170;
+const MOVE_MS = 320;
+const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+
+function reducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export class LibraryView extends ItemView {
   private items: LibraryItem[] = [];
+  private itemByPath = new Map<string, LibraryItem>();
   private descriptions: Record<string, string> = {};
   private category: string | null = null;
   private mode: Mode = "all";
@@ -51,9 +61,17 @@ export class LibraryView extends ItemView {
   private query = "";
 
   private sideEl: HTMLElement;
+  private sideListEl: HTMLElement;
+  private indicatorEl: HTMLElement;
   private mainEl: HTMLElement;
-  private bodyEl: HTMLElement;
+  private gridEl: HTMLElement;
   private countEl: HTMLElement;
+  private sortEl: HTMLSelectElement | null = null;
+
+  /** Card elements by note path; they survive re-renders so they can animate. */
+  private cards = new Map<string, HTMLElement>();
+  private gridToken = 0;
+  private dragEl: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: FelisidianPlugin) {
     super(leaf);
@@ -86,7 +104,12 @@ export class LibraryView extends ItemView {
     this.contentEl.empty();
     this.contentEl.addClass("fel-lib");
     this.sideEl = this.contentEl.createDiv({ cls: "fel-side" });
+    this.indicatorEl = this.sideEl.createDiv({ cls: "fel-indicator is-hidden" });
+    this.sideListEl = this.sideEl.createDiv({ cls: "fel-side-list" });
     this.mainEl = this.contentEl.createDiv({ cls: "fel-main" });
+
+    this.gridEl = createDiv({ cls: "fel-grid" });
+    this.setupDrag(this.gridEl);
 
     const refresh = debounce(() => this.refresh(), 250, true);
     this.registerEvent(this.app.metadataCache.on("changed", refresh));
@@ -109,6 +132,7 @@ export class LibraryView extends ItemView {
 
   refresh() {
     this.items = collectItems(this.app);
+    this.itemByPath = new Map(this.items.map((i) => [i.path, i]));
     this.descriptions = collectCategoryDescriptions(this.app);
     if (this.category && !this.categoryPaths().includes(this.category)) {
       this.category = null;
@@ -136,14 +160,13 @@ export class LibraryView extends ItemView {
   }
 
   private renderSide() {
-    const side = this.sideEl;
-    side.empty();
+    const list = this.sideListEl;
+    list.empty();
 
     const shortcut = (label: string, mode: Mode, count?: number) => {
-      const row = side.createDiv({
-        cls:
-          "fel-side-link fel-plain" +
-          (this.mode === mode && this.category === null ? " is-active" : ""),
+      const active = this.mode === mode && this.category === null;
+      const row = list.createDiv({
+        cls: "fel-side-link fel-plain" + (active ? " is-active" : ""),
       });
       row.createSpan({ cls: "fel-name", text: label });
       if (count !== undefined) row.createSpan({ cls: "fel-count", text: String(count) });
@@ -152,21 +175,26 @@ export class LibraryView extends ItemView {
     shortcut("Recent", "recent");
     shortcut("Reading list", "reading", this.reading().length);
 
-    const heading = side.createDiv({ cls: "fel-side-heading", text: "My library" });
+    const heading = list.createDiv({
+      cls: "fel-side-heading" + (this.mode === "all" && !this.category ? " is-active" : ""),
+      text: "My library",
+    });
     heading.addEventListener("click", () => this.go(null));
 
-    const tree = side.createDiv({ cls: "fel-tree" });
+    const tree = list.createDiv({ cls: "fel-tree" });
     const own = this.items.filter((i) => i.kind === "item");
     buildTree(own, this.plugin.settings.customCategories).forEach((node) =>
       this.renderNode(tree, node, 0)
     );
 
-    const add = side.createDiv({ cls: "fel-side-add", text: "New tag +" });
+    const add = list.createDiv({ cls: "fel-side-add", text: "New tag +" });
     add.addEventListener("click", () => {
       new NewTagModal(this.app, this.plugin, this.categoryPaths(), this.category, (path) =>
         this.go(path)
       ).open();
     });
+
+    this.moveIndicator();
   }
 
   private renderNode(parent: HTMLElement, node: CategoryNode, depth: number) {
@@ -182,6 +210,35 @@ export class LibraryView extends ItemView {
     node.children.forEach((c) => this.renderNode(parent, c, depth + 1));
   }
 
+  /** Slides the highlight from the previous selection to the new one. */
+  private moveIndicator() {
+    const ind = this.indicatorEl;
+    const active = this.sideListEl.querySelector<HTMLElement>(
+      ".fel-side-link.is-active, .fel-side-heading.is-active"
+    );
+    if (!active) {
+      ind.addClass("is-hidden");
+      return;
+    }
+
+    const color = this.category ? this.color(this.category) : "#b8a88f";
+    ind.style.setProperty("--ind", color);
+    // Measure against the scrolling sidebar itself, whatever the row's offsetParent is.
+    const side = this.sideEl.getBoundingClientRect();
+    const row = active.getBoundingClientRect();
+    const x = row.left - side.left - this.sideEl.clientLeft + this.sideEl.scrollLeft;
+    const y = row.top - side.top - this.sideEl.clientTop + this.sideEl.scrollTop;
+    ind.style.height = `${row.height}px`;
+    ind.style.width = `${row.width}px`;
+    ind.style.transform = `translate(${x}px, ${y}px)`;
+
+    if (ind.hasClass("is-hidden")) {
+      // First placement: jump there, then enable transitions.
+      ind.removeClass("is-hidden");
+      requestAnimationFrame(() => ind.addClass("is-ready"));
+    }
+  }
+
   // ---- main area ---------------------------------------------------------
 
   private title(): string {
@@ -192,6 +249,7 @@ export class LibraryView extends ItemView {
   }
 
   private renderMain() {
+    const first = this.captureRects();
     const main = this.mainEl;
     main.empty();
 
@@ -203,8 +261,20 @@ export class LibraryView extends ItemView {
     if (desc) main.createEl("p", { cls: "fel-desc", text: desc });
 
     this.renderTabs(main);
-    this.bodyEl = main.createDiv({ cls: "fel-tab-body" });
-    this.renderTabBody();
+
+    if (this.tab === "canvases") {
+      this.cards.clear();
+      this.gridEl.empty();
+      this.sortEl = null;
+      this.renderCanvases(main);
+      return;
+    }
+
+    const body = main.createDiv({ cls: "fel-tab-body" });
+    this.renderAuthors(body, this.scoped());
+    this.renderBar(body);
+    main.appendChild(this.gridEl);
+    this.renderGrid(first);
   }
 
   private renderBreadcrumb(parent: HTMLElement) {
@@ -240,17 +310,8 @@ export class LibraryView extends ItemView {
     });
   }
 
-  private renderTabBody() {
-    this.bodyEl.empty();
-    if (this.tab === "canvases") {
-      this.renderCanvases();
-      return;
-    }
-
-    const scoped = this.scoped();
-    this.renderAuthors(this.bodyEl, scoped);
-
-    const bar = this.bodyEl.createDiv({ cls: "fel-bar" });
+  private renderBar(parent: HTMLElement) {
+    const bar = parent.createDiv({ cls: "fel-bar" });
     this.countEl = bar.createSpan({ cls: "fel-total" });
 
     const add = bar.createEl("button", { cls: "fel-btn" });
@@ -278,9 +339,7 @@ export class LibraryView extends ItemView {
       this.sort = select.value as SortKey;
       this.renderGrid();
     });
-
-    this.bodyEl.createDiv({ cls: "fel-grid" });
-    this.renderGrid();
+    this.sortEl = select;
   }
 
   private scoped(): LibraryItem[] {
@@ -294,6 +353,7 @@ export class LibraryView extends ItemView {
     });
   }
 
+  /** The Authors section can be collapsed; the choice is remembered. */
   private renderAuthors(parent: HTMLElement, scoped: LibraryItem[]) {
     const counts = new Map<string, number>();
     scoped.forEach((i) =>
@@ -301,11 +361,19 @@ export class LibraryView extends ItemView {
     );
     if (counts.size === 0) return;
 
-    const label = parent.createDiv({ cls: "fel-section" });
+    const open = this.plugin.settings.authorsOpen;
+    const label = parent.createDiv({
+      cls: "fel-section",
+      attr: { role: "button", "aria-expanded": String(open), title: "Show or hide authors" },
+    });
+    const chev = label.createSpan({ cls: "fel-chev" + (open ? " is-open" : "") });
+    setIcon(chev, "chevron-down");
     label.createSpan({ text: "Authors" });
     label.createDiv({ cls: "fel-rule" });
 
-    const wrap = parent.createDiv({ cls: "fel-chips" });
+    const collapse = parent.createDiv({ cls: "fel-collapse" + (open ? " is-open" : "") });
+    const wrap = collapse.createDiv({ cls: "fel-collapse-inner" }).createDiv({ cls: "fel-chips" });
+
     [...counts.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 24)
@@ -318,9 +386,25 @@ export class LibraryView extends ItemView {
         chip.addEventListener("click", () => {
           if (this.authors.has(author)) this.authors.delete(author);
           else this.authors.add(author);
-          this.renderTabBody();
+          chip.toggleClass("is-active", this.authors.has(author));
+          this.renderGrid();
         });
       });
+
+    label.addEventListener("click", () => {
+      const next = !collapse.hasClass("is-open");
+      collapse.toggleClass("is-open", next);
+      chev.toggleClass("is-open", next);
+      label.setAttr("aria-expanded", String(next));
+      this.plugin.settings.authorsOpen = next;
+      void this.plugin.saveData(this.plugin.settings);
+    });
+  }
+
+  // ---- cards: filtering, ordering, animation ----------------------------
+
+  private scopeKey(): string {
+    return `${this.mode}|${this.tab}|${this.category ?? ""}`;
   }
 
   private visible(): LibraryItem[] {
@@ -334,7 +418,16 @@ export class LibraryView extends ItemView {
       );
     });
 
-    const cmp: Record<SortKey, (a: LibraryItem, b: LibraryItem) => number> = {
+    if (this.sort === "manual") {
+      const order = this.plugin.settings.cardOrder[this.scopeKey()] ?? [];
+      const rank = (p: string) => {
+        const i = order.indexOf(p);
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+      };
+      return list.sort((a, b) => rank(a.path) - rank(b.path) || b.mtime - a.mtime);
+    }
+
+    const cmp: Record<Exclude<SortKey, "manual">, (a: LibraryItem, b: LibraryItem) => number> = {
       recent: (a, b) => b.mtime - a.mtime,
       title: (a, b) => a.title.localeCompare(b.title),
       year: (a, b) => (b.year ?? 0) - (a.year ?? 0),
@@ -344,12 +437,70 @@ export class LibraryView extends ItemView {
     return this.mode === "recent" ? sorted.slice(0, 24) : sorted;
   }
 
-  private renderGrid() {
-    const grid = this.bodyEl.querySelector<HTMLElement>(".fel-grid");
-    if (!grid) return;
+  private captureRects(): Map<string, DOMRect> {
+    const rects = new Map<string, DOMRect>();
+    this.cards.forEach((el, path) => rects.set(path, el.getBoundingClientRect()));
+    return rects;
+  }
+
+  /** Plays cards from their previous position to the current one (FLIP). */
+  private flip(first: Map<string, DOMRect>, skip?: HTMLElement) {
+    if (reducedMotion()) return;
+    this.cards.forEach((el, path) => {
+      if (el === skip) return;
+      const before = first.get(path);
+      if (!before) return;
+      const after = el.getBoundingClientRect();
+      const dx = before.left - after.left;
+      const dy = before.top - after.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      el.animate(
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
+        { duration: MOVE_MS, easing: EASE }
+      );
+    });
+  }
+
+  /**
+   * Re-renders the grid. Cards that no longer match fade out first; the rest
+   * then glide into their new positions and new matches fade in.
+   */
+  private renderGrid(first: Map<string, DOMRect> = this.captureRects()) {
+    if (!this.gridEl.isConnected) return;
+    const token = ++this.gridToken;
     const list = this.visible();
-    this.countEl.setText(`${this.tab === "notebooks" ? "Notebooks" : "Items"} (${list.length})`);
-    grid.empty();
+    const label = this.tab === "notebooks" ? "Notebooks" : "Items";
+    this.countEl?.setText(`${label} (${list.length})`);
+    if (this.sortEl) this.sortEl.value = this.sort;
+
+    const wanted = new Set(list.map((i) => i.path));
+    const leaving: HTMLElement[] = [];
+    this.cards.forEach((el, path) => {
+      if (!wanted.has(path)) {
+        leaving.push(el);
+        this.cards.delete(path);
+      }
+    });
+
+    const animate = !reducedMotion();
+    if (leaving.length && animate) {
+      leaving.forEach((el) => {
+        el.addClass("is-leaving");
+        el.style.pointerEvents = "none";
+      });
+      window.setTimeout(() => {
+        leaving.forEach((el) => el.remove());
+        if (token === this.gridToken) this.placeCards(list, first, animate);
+      }, LEAVE_MS);
+    } else {
+      leaving.forEach((el) => el.remove());
+      this.placeCards(list, first, animate);
+    }
+  }
+
+  private placeCards(list: LibraryItem[], first: Map<string, DOMRect>, animate: boolean) {
+    const grid = this.gridEl;
+    grid.querySelector(".fel-empty")?.remove();
 
     if (list.length === 0) {
       grid.createDiv({
@@ -361,48 +512,125 @@ export class LibraryView extends ItemView {
       });
       return;
     }
-    list.forEach((item) => this.renderCard(grid, item));
+
+    const entering: HTMLElement[] = [];
+    list.forEach((item) => {
+      let el = this.cards.get(item.path);
+      if (!el) {
+        el = this.createCard(item.path);
+        this.cards.set(item.path, el);
+        entering.push(el);
+      }
+      this.fillCard(el, item);
+      grid.appendChild(el); // appending in order also re-orders existing cards
+    });
+
+    if (!animate) return;
+    this.flip(first);
+    entering.forEach((el) => {
+      el.animate(
+        [
+          { opacity: 0, transform: "scale(0.9)" },
+          { opacity: 1, transform: "scale(1)" },
+        ],
+        { duration: MOVE_MS, easing: EASE }
+      );
+    });
   }
 
-  private renderCard(grid: HTMLElement, item: LibraryItem) {
-    const key = categoryKey(item.category);
-    const card = grid.createDiv({ cls: "fel-card" });
-    card.style.setProperty("--fel-cat", toHex(item.color) ?? this.color(key));
+  private createCard(path: string): HTMLElement {
+    const el = createDiv({ cls: "fel-card" });
+    el.dataset.path = path;
+    el.draggable = true;
 
-    const top = card.createDiv({ cls: "fel-card-top" });
+    el.addEventListener("click", (evt) => {
+      const target = el.dataset.path;
+      if (target) this.plugin.openReader(target, Keymap.isModEvent(evt) ? "tab" : this.leaf);
+    });
+    el.addEventListener("dragstart", (evt) => {
+      this.dragEl = el;
+      el.addClass("is-dragging");
+      evt.dataTransfer?.setData("text/plain", el.dataset.path ?? "");
+      if (evt.dataTransfer) evt.dataTransfer.effectAllowed = "move";
+    });
+    el.addEventListener("dragend", () => this.endDrag());
+    return el;
+  }
+
+  private fillCard(el: HTMLElement, item: LibraryItem) {
+    el.empty();
+    const key = categoryKey(item.category);
+    el.style.setProperty("--fel-cat", toHex(item.color) ?? this.color(key));
+
+    const top = el.createDiv({ cls: "fel-card-top" });
     if (item.year) top.createSpan({ cls: "fel-badge", text: String(item.year) });
     top.createSpan({ cls: "fel-card-cat", text: item.category[item.category.length - 1] });
 
-    card.createDiv({ cls: "fel-card-title", text: item.title });
+    el.createDiv({ cls: "fel-card-title", text: item.title });
     if (item.authors.length) {
-      card.createDiv({ cls: "fel-card-authors", text: item.authors.join(", ") });
+      el.createDiv({ cls: "fel-card-authors", text: item.authors.join(", ") });
     }
 
-    const foot = card.createDiv({ cls: "fel-card-foot" });
+    const foot = el.createDiv({ cls: "fel-card-foot" });
     const notes = foot.createSpan({ cls: "fel-notes" });
     setIcon(notes.createSpan({ cls: "fel-notes-icon" }), "message-square");
     notes.createSpan({ text: String(item.notes) });
     if (item.pages) {
-      foot.createSpan({
-        cls: "fel-pages",
-        text: `${item.currentPage ?? 0}/${item.pages} p.`,
-      });
+      foot.createSpan({ cls: "fel-pages", text: `${item.currentPage ?? 0}/${item.pages} p.` });
     }
     renderRing(foot, item.progress);
-
-    card.addEventListener("click", (evt) => {
-      this.plugin.openReader(item.path, Keymap.isModEvent(evt) ? "tab" : this.leaf);
-    });
   }
 
-  private renderCanvases() {
+  // ---- drag to reorder ---------------------------------------------------
+
+  private setupDrag(grid: HTMLElement) {
+    grid.addEventListener("dragover", (evt) => {
+      const dragged = this.dragEl;
+      if (!dragged) return;
+      evt.preventDefault();
+      if (evt.dataTransfer) evt.dataTransfer.dropEffect = "move";
+
+      const over = (evt.target as HTMLElement).closest<HTMLElement>(".fel-card");
+      if (!over || over === dragged || over.hasClass("is-leaving")) return;
+
+      const rect = over.getBoundingClientRect();
+      const after = evt.clientX > rect.left + rect.width / 2;
+      const reference = after ? over.nextElementSibling : over;
+      // Already sitting in that slot.
+      if (reference === dragged || dragged.nextElementSibling === reference) return;
+
+      const first = this.captureRects();
+      grid.insertBefore(dragged, reference);
+      this.flip(first, dragged);
+    });
+    grid.addEventListener("drop", (evt) => evt.preventDefault());
+  }
+
+  private endDrag() {
+    const dragged = this.dragEl;
+    if (!dragged) return;
+    dragged.removeClass("is-dragging");
+    this.dragEl = null;
+
+    const order = Array.from(this.gridEl.querySelectorAll<HTMLElement>(".fel-card"))
+      .map((c) => c.dataset.path)
+      .filter((p): p is string => !!p);
+    this.plugin.settings.cardOrder[this.scopeKey()] = order;
+    this.sort = "manual";
+    if (this.sortEl) this.sortEl.value = "manual";
+    void this.plugin.saveData(this.plugin.settings);
+  }
+
+  // ---- canvases / add ------------------------------------------------------
+
+  private renderCanvases(parent: HTMLElement) {
     const needle = this.category?.split("/").pop()?.toLowerCase();
     const files = this.app.vault
       .getFiles()
       .filter((f) => f.extension === "canvas")
       .filter((f) => !needle || f.path.toLowerCase().includes(needle));
 
-    const list = this.bodyEl.createDiv({ cls: "fel-rows" });
+    const list = parent.createDiv({ cls: "fel-tab-body fel-rows" });
     if (files.length === 0) {
       list.createDiv({ cls: "fel-empty", text: "No canvases here yet." });
       return;

@@ -7,7 +7,7 @@ Thumbs.db
 .claude/
 
 # third-party visual reference (not redistributed)
-docs/reference/
+assets/images/reference/
 
 # local test vault config
 dev-vault/.obsidian/

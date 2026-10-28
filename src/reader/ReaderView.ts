@@ -10,8 +10,8 @@ import {
   setIcon,
 } from "obsidian";
 import type FelisidianPlugin from "../main";
-import { PALETTE, categoryColor, colorKeyFor, toHex } from "../library/colors";
-import { renderRing, renderSwatches } from "../library/ui";
+import { categoryColor, toHex } from "../library/colors";
+import { renderRing } from "../library/ui";
 
 export const VIEW_TYPE_READER = "felisidian-reader";
 
@@ -110,12 +110,14 @@ export class ReaderView extends ItemView {
     const catKey = catPath.join("/");
     const overrides = this.plugin.settings.categoryColors;
     const color = toHex(typeof fm.color === "string" ? fm.color : undefined) ?? categoryColor(catKey, overrides);
-    const colorKey =
-      typeof fm.color === "string" && PALETTE[fm.color] ? fm.color : colorKeyFor(catKey, overrides);
-
     // The whole page takes the note's pastel color.
     this.containerEl.style.setProperty("--fel-cat", color);
     const page = root.createDiv({ cls: "fel-reader-page" });
+
+    const back = page.createDiv({ cls: "fel-back", attr: { role: "button" } });
+    setIcon(back.createSpan(), "arrow-left");
+    back.createSpan({ text: "Back to library" });
+    back.addEventListener("click", () => this.plugin.openLibrary(catKey || null, this.leaf));
 
     this.renderCrumbs(page, catPath, title);
 
@@ -130,15 +132,6 @@ export class ReaderView extends ItemView {
 
     this.renderProgress(meta, file, current, pages);
 
-    renderSwatches(
-      meta,
-      colorKey,
-      (key) =>
-        this.app.fileManager.processFrontMatter(file, (f) => {
-          f.color = key;
-        }),
-      true
-    );
 
     const edit = meta.createEl("button", { cls: "fel-btn fel-edit" });
     setIcon(edit.createSpan(), "pencil");

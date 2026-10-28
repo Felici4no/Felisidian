@@ -1,0 +1,10 @@
+{
+  "id": "felisidian",
+  "name": "Felisidian",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "A visual library for your vault: browse notes as colored cards by category, with tags, authors, page counts and reading progress.",
+  "author": "Lucas Feliciano",
+  "authorUrl": "https://github.com/Felici4no",
+  "isDesktopOnly": false
+}

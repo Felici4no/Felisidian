@@ -12,7 +12,7 @@ A library to follow what you are **reading** and what you are **thinking** from 
 - **Views** in the sidebar (Library, Reading now, Captures, Ideas, Recent) and a tree of subjects with colors and counts. Views are filters over the same notes, not folders.
 - **Compact filters**: Type, Reading status, Authors and More filters (subject, format, linked source, elaboration, connections). Combine them freely; active filters show as removable chips with the result count.
 - **Reading page** for every note, with a Back button that restores filters and scroll. Select a passage to highlight it or turn it into a **reading note** that keeps its source and location; passage and your own words are drawn as separate blocks.
-- **Develop idea** opens a window with the origin note and a simple way to link other notes. Nothing is written for you.
+- **Develop idea** opens a writing-first window: the idea as a full-width sentence, a large area for your argument, the origin note as a collapsed reminder and linked notes as chips. Everything works by keyboard (Ctrl+Enter saves). Nothing is written for you, and an idea has no elaboration state unless you set one.
 - Pastel cards and notes tinted by subject color, drag to reorder cards, animated filtering, Portuguese and English, light and dark themes.
 
 See [docs/PROPERTIES.md](docs/PROPERTIES.md) for the properties each type uses.
@@ -20,6 +20,7 @@ See [docs/PROPERTIES.md](docs/PROPERTIES.md) for the properties each type uses.
 ![Library](assets/images/screenshots/library-overview.jpg)
 ![Source page](assets/images/screenshots/source-page.jpg)
 ![Reading note](assets/images/screenshots/reading-note.jpg)
+![Develop idea window](assets/images/screenshots/idea-window.jpg)
 
 ## Not yet
 

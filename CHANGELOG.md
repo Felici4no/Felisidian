@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- Writing windows (idea, reading note, quick capture) redesigned for writing: full-width title, large editor, collapsed origin, linked notes as chips, visible Save and Cancel, keyboard-complete.
+- Windows use the library look (cream paper, serif titles, pill buttons) in light and dark themes.
+- Cards show the format (Book, Article, Video) instead of repeating "Source".
+- A view defines its own type: Ideas, Captures and Reading now show no redundant Type filter or chip.
+- Ideas have no elaboration state by default (optional); captures stay pending.
+- Larger, higher-contrast secondary text, also in the dark theme.
+
 ### Added
 
 - Content types (source, reading note, idea, quick capture) with their own cards.

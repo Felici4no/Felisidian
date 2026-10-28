@@ -1,7 +1,6 @@
 ---
 type: idea
 title: Explicar com clareza consolida o que aprendi
-elaboration: pending
 created: 2026-10-27
 category: Aprendizagem
 demo: true

@@ -26,7 +26,7 @@ See [docs/PROPERTIES.md](docs/PROPERTIES.md) for the properties each type uses.
 
 - Covers and metadata lookup (ISBN, DOI) and PDF/EPUB reading: out of scope for now.
 - A Bases view and several highlight colors.
-- Validation on mobile.
+- Validation on a real phone: the narrow layout was checked in Obsidian's phone emulation, touch and the virtual keyboard were not. See [docs/MOBILE.md](docs/MOBILE.md).
 
 ## Development
 

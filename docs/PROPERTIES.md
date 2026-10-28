@@ -21,9 +21,9 @@ Portuguese aliases are accepted: `fonte`, `nota-de-leitura`, `ideia`, `captura`,
 - **Reading status** (`status`) is about the *source*: `want`, `reading`, `paused`, `done`.
   When absent it is inferred from `pages` and `current_page` so older notes keep working.
 - **Elaboration** (`elaboration`) is about *your notes*: `pending`, `developing`, `done`.
-  A finished book can still have notes in development. Captures and reading notes
-  default to `pending`; **ideas have no state unless you set one**, so a new idea is
-  not treated as unfinished work.
+  A finished book can still have notes in development. Only **captures** start as
+  `pending` (that is their purpose). **Reading notes and ideas have no state unless you
+  set one**: having text, or being empty, does not turn a note into a to-do.
 
 ## Source formats (`format`)
 

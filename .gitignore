@@ -11,3 +11,4 @@ assets/images/reference/
 
 # local test vault config
 dev-vault/.obsidian/
+.test-out/

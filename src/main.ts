@@ -1,22 +1,40 @@
 import { MarkdownView, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { setLanguage, t } from "./i18n";
 import { categoryColor, toHex } from "./library/colors";
-import { LibraryView, VIEW_TYPE_LIBRARY } from "./library/LibraryView";
-import { buildTree, collectItems, flattenTree } from "./library/model";
-import { ReaderView, VIEW_TYPE_READER } from "./reader/ReaderView";
-import { NewNoteModal, NewTagModal } from "./ui/modals";
+import { LibraryState, defaultLibraryState } from "./library/filters";
+import { LibraryView } from "./library/LibraryView";
+import { PreviewCache, collectItems } from "./library/model";
+import { buildTree, flattenTree } from "./library/tree";
+import type { LibraryItem } from "./library/types";
+import { Navigator, VIEW_TYPE_LIBRARY, VIEW_TYPE_READER } from "./nav";
+import { ReaderView } from "./reader/ReaderView";
 import {
   DEFAULT_SETTINGS,
   FelisidianSettings,
   FelisidianSettingTab,
 } from "./settings";
 import { applyTheme, clearTheme } from "./theme";
+import {
+  CaptureModal,
+  IdeaModal,
+  NewTagModal,
+  ReadingNoteModal,
+  SourceModal,
+} from "./ui/modals";
 
 export default class FelisidianPlugin extends Plugin {
   settings: FelisidianSettings;
+  nav: Navigator;
+  /** Where the user was in the library; restored when they come back. */
+  libraryState: LibraryState = defaultLibraryState();
+  /** The user's own writing for note cards, keyed by path. */
+  previews: PreviewCache = new Map();
   private libraryActions = new Map<MarkdownView, HTMLElement>();
 
   async onload() {
     await this.loadSettings();
+    setLanguage(this.settings.language);
+    this.nav = new Navigator(this);
     this.addSettingTab(new FelisidianSettingTab(this.app, this));
 
     this.registerView(VIEW_TYPE_LIBRARY, (leaf) => new LibraryView(leaf, this));
@@ -30,17 +48,6 @@ export default class FelisidianPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "read-current-note",
-      name: "Read current note in reading mode",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file) return false;
-        if (!checking) this.openReader(file.path, this.app.workspace.getLeaf(false));
-        return true;
-      },
-    });
-
-    this.addCommand({
       id: "back-to-library",
       name: "Back to library",
       callback: () => {
@@ -50,15 +57,38 @@ export default class FelisidianPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "new-tag",
-      name: "New tag",
-      callback: () => new NewTagModal(this.app, this, this.categoryPaths(), null).open(),
+      id: "read-current-note",
+      name: "Read current note in reading mode",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) return false;
+        if (!checking) void this.nav.openReader(file.path, this.app.workspace.getLeaf(false));
+        return true;
+      },
     });
 
     this.addCommand({
-      id: "new-note",
-      name: "New library note",
-      callback: () => new NewNoteModal(this.app, this, this.categoryPaths(), null, false).open(),
+      id: "quick-capture",
+      name: "Quick capture",
+      callback: () => this.openCaptureModal(null),
+    });
+
+    this.addCommand({
+      id: "new-source",
+      name: "New source",
+      callback: () => this.openSourceModal(null, false),
+    });
+
+    this.addCommand({
+      id: "new-idea",
+      name: "New idea",
+      callback: () => this.openIdeaModal(null),
+    });
+
+    this.addCommand({
+      id: "new-tag",
+      name: "New tag",
+      callback: () => this.openTagModal(null),
     });
 
     this.addCommand({
@@ -85,12 +115,86 @@ export default class FelisidianPlugin extends Plugin {
     this.clearTint();
   }
 
+  // ---- windows -------------------------------------------------------------------
+
   categoryPaths(): string[] {
-    const items = collectItems(this.app).filter((i) => i.kind === "item");
+    const items = collectItems(this.app, this.previews).filter((i) => i.kind !== "notebook");
     return flattenTree(buildTree(items, this.settings.customCategories));
   }
 
-  /** Category path of a note ("A/B"), or null when it has none. */
+  openTagModal(parent: string | null, onDone?: (path: string) => void) {
+    new NewTagModal(this.app, this, this.categoryPaths(), parent, onDone).open();
+  }
+
+  openSourceModal(category: string | null, notebook: boolean) {
+    new SourceModal(this.app, this, this.categoryPaths(), category, notebook).open();
+  }
+
+  openCaptureModal(category: string | null) {
+    new CaptureModal(this.app, this, this.categoryPaths(), category).open();
+  }
+
+  /** Reading note from a passage; `source` is optional and can be changed in the window. */
+  openReadingNoteModal(
+    source: LibraryItem | null,
+    quote: string,
+    leaf?: WorkspaceLeaf,
+    locationHint = ""
+  ) {
+    const sources = collectItems(this.app, this.previews).filter((i) => i.kind === "source");
+    new ReadingNoteModal(this.app, this, {
+      sources,
+      sourcePath: source?.path ?? null,
+      quote,
+      locationHint,
+      leaf: leaf ?? this.app.workspace.getLeaf(false),
+    }).open();
+  }
+
+  /** An idea as its own note, optionally growing from another note. */
+  openIdeaModal(
+    origin: TFile | null,
+    originContext = "",
+    sourcePaths: string[] = [],
+    leaf?: WorkspaceLeaf
+  ) {
+    new IdeaModal(this.app, this, {
+      origin,
+      originContext,
+      sourcePaths,
+      leaf: leaf ?? this.app.workspace.getLeaf(false),
+    }).open();
+  }
+
+  // ---- navigation ----------------------------------------------------------------
+
+  /** Opens the library; with a category it jumps there, otherwise it restores the last state. */
+  async openLibrary(category?: string | null, leaf?: WorkspaceLeaf) {
+    if (leaf) {
+      await this.nav.openSubject(leaf, category ?? null);
+      return;
+    }
+    if (category !== undefined) {
+      const state = defaultLibraryState();
+      if (category) state.filters.categories = [category];
+      this.libraryState = state;
+    }
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_LIBRARY)[0];
+    if (existing) {
+      if (category !== undefined) {
+        await existing.setViewState({ type: VIEW_TYPE_LIBRARY, state: { restore: true }, active: true });
+      }
+      this.app.workspace.revealLeaf(existing);
+      return;
+    }
+    const created = this.app.workspace.getLeaf(true);
+    await created.setViewState({ type: VIEW_TYPE_LIBRARY, state: { restore: true }, active: true });
+    this.app.workspace.revealLeaf(created);
+  }
+
+  // ---- note colors ------------------------------------------------------------------
+
+  /** Category path of a note (\"A/B\"), or null when it has none. */
   categoryOf(file: TFile): string | null {
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
     const raw = Array.isArray(fm?.category) ? fm?.category[0] : fm?.category;
@@ -115,9 +219,9 @@ export default class FelisidianPlugin extends Plugin {
       if (!(view instanceof MarkdownView)) return;
       const el = view.containerEl;
       if (!this.libraryActions.has(view)) {
-        const action = view.addAction("library", "Back to library", () => {
+        const action = view.addAction("library", t("misc.backToLibrary"), () => {
           const f = view.file;
-          this.openLibrary(f ? this.categoryOf(f) : null, view.leaf);
+          void this.openLibrary(f ? this.categoryOf(f) : null, view.leaf);
         });
         this.libraryActions.set(view, action);
       }
@@ -147,30 +251,8 @@ export default class FelisidianPlugin extends Plugin {
       if (leaf.view instanceof LibraryView) leaf.view.refresh();
     });
     this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).forEach((leaf) => {
-      if (leaf.view instanceof ReaderView) leaf.view.rerender();
+      if (leaf.view instanceof ReaderView) void leaf.view.rerender();
     });
-  }
-
-  /** Opens the library, optionally on a category and in a given leaf. */
-  async openLibrary(category: string | null = null, leaf?: WorkspaceLeaf) {
-    if (leaf) {
-      await leaf.setViewState({ type: VIEW_TYPE_LIBRARY, state: { category }, active: true });
-      return;
-    }
-    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_LIBRARY)[0];
-    if (existing) {
-      this.app.workspace.revealLeaf(existing);
-      return;
-    }
-    const created = this.app.workspace.getLeaf(true);
-    await created.setViewState({ type: VIEW_TYPE_LIBRARY, state: { category }, active: true });
-    this.app.workspace.revealLeaf(created);
-  }
-
-  /** Opens a note in the read-only reader, in place or in a new tab. */
-  async openReader(path: string, target: WorkspaceLeaf | "tab") {
-    const leaf = target === "tab" ? this.app.workspace.getLeaf("tab") : target;
-    await leaf.setViewState({ type: VIEW_TYPE_READER, state: { path }, active: true });
   }
 
   async loadSettings() {
@@ -179,6 +261,7 @@ export default class FelisidianPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+    setLanguage(this.settings.language);
     applyTheme(this.settings);
     this.tintNotes();
     this.refreshViews();

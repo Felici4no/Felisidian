@@ -1,0 +1,20 @@
+/* Felisidian — everything is scoped under body.felisidian */
+
+body.felisidian {
+  --interactive-accent: var(--fel-accent);
+  --interactive-accent-hover: color-mix(in srgb, var(--fel-accent) 85%, white);
+  --text-accent: var(--fel-accent);
+  --font-text-size: var(--fel-font-size);
+  --radius-s: calc(var(--fel-radius) * 0.5);
+  --radius-m: var(--fel-radius);
+  --radius-l: calc(var(--fel-radius) * 1.5);
+}
+
+body.felisidian .callout {
+  border-radius: var(--radius-m);
+}
+
+body.felisidian .markdown-rendered pre,
+body.felisidian .cm-s-obsidian .HyperMD-codeblock {
+  border-radius: var(--radius-m);
+}

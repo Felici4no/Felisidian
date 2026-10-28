@@ -1,7 +1,9 @@
 import { setIcon } from "obsidian";
 import { language, t } from "../i18n";
+import type { StringKey } from "../i18n";
 import { toHex } from "./colors";
 import { renderRing } from "./ui";
+import { kindLabelKey } from "./types";
 import type { ItemKind, LibraryItem } from "./types";
 
 export const KIND_ICONS: Record<ItemKind, string> = {
@@ -27,9 +29,7 @@ export function itemTint(item: LibraryItem, subjectColor: string): string {
 }
 
 export function kindLabel(item: LibraryItem): string {
-  const base = t(`kind.${item.kind}`);
-  if (item.kind === "source" && item.format) return `${base} · ${t(`format.${item.format}`)}`;
-  return base;
+  return t(kindLabelKey(item) as StringKey);
 }
 
 function shortDate(ms: number): string {

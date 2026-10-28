@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting, TFile } from "obsidian";
+import { App, Modal, Notice, Setting, TFile, WorkspaceLeaf } from "obsidian";
 import { t } from "../i18n";
 import type FelisidianPlugin from "../main";
 import { PALETTE, PALETTE_KEYS, colorKeyFor } from "../library/colors";
@@ -10,7 +10,7 @@ import {
   safeFileName,
   truncate,
 } from "../library/text";
-import type { LibraryItem } from "../library/types";
+import { ELABORATIONS, Elaboration, LibraryItem } from "../library/types";
 import { renderSwatches } from "../library/ui";
 
 const LIBRARY_FOLDER = "Library";
@@ -30,6 +30,12 @@ export async function createLibraryNote(
   return app.vault.create(path, content);
 }
 
+/** Gives a window the library's look: cream paper, serif titles, pill buttons. */
+function skin(modal: Modal, wide = false) {
+  modal.modalEl.addClass("fel-modal");
+  modal.modalEl.toggleClass("is-wide", wide);
+}
+
 function submitOnEnter(modal: Modal, submit: () => void) {
   modal.contentEl.addEventListener("keydown", (evt) => {
     const el = evt.target as HTMLElement;
@@ -40,7 +46,7 @@ function submitOnEnter(modal: Modal, submit: () => void) {
   });
 }
 
-/** Ctrl/Cmd+Enter saves from a text area. */
+/** Ctrl/Cmd+Enter saves from anywhere in the window. */
 function submitOnModEnter(modal: Modal, submit: () => void) {
   modal.contentEl.addEventListener("keydown", (evt) => {
     if (evt.key === "Enter" && (evt.ctrlKey || evt.metaKey)) {
@@ -48,6 +54,26 @@ function submitOnModEnter(modal: Modal, submit: () => void) {
       submit();
     }
   });
+}
+
+let uid = 0;
+
+/** A label above a full-width control, tied together for screen readers. */
+function field(parent: HTMLElement, label: string, cls = ""): { wrap: HTMLElement; id: string } {
+  const id = `fel-f-${++uid}`;
+  const wrap = parent.createDiv({ cls: `fel-field ${cls}`.trim() });
+  wrap.createEl("label", { cls: "fel-field-label", text: label, attr: { for: id } });
+  return { wrap, id };
+}
+
+/** Cancel + main action, with the keyboard shortcut spelled out. */
+function footer(parent: HTMLElement, modal: Modal, okText: string, onOk: () => void) {
+  const foot = parent.createDiv({ cls: "fel-modal-foot" });
+  foot.createSpan({ cls: "fel-kbd-hint", text: t("modal.shortcut") });
+  const cancel = foot.createEl("button", { cls: "fel-modal-cancel", text: t("modal.cancel") });
+  cancel.addEventListener("click", () => modal.close());
+  const ok = foot.createEl("button", { cls: "mod-cta fel-modal-ok", text: okText });
+  ok.addEventListener("click", onOk);
 }
 
 // ---- tag ---------------------------------------------------------------------
@@ -69,6 +95,7 @@ export class NewTagModal extends Modal {
   }
 
   onOpen() {
+    skin(this);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(t("modal.newTag"));
@@ -99,10 +126,9 @@ export class NewTagModal extends Modal {
     this.previewEl = contentEl.createDiv({ cls: "fel-preview" });
     this.renderPreview();
 
-    new Setting(contentEl).addButton((b) =>
-      b.setButtonText(t("modal.createTag")).setCta().onClick(() => this.submit())
-    );
+    footer(contentEl, this, t("modal.createTag"), () => this.submit());
     submitOnEnter(this, () => this.submit());
+    submitOnModEnter(this, () => this.submit());
   }
 
   private renderPreview() {
@@ -159,6 +185,7 @@ export class SourceModal extends Modal {
   }
 
   onOpen() {
+    skin(this);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(this.notebook ? t("modal.newNotebook") : t("modal.newSource"));
@@ -207,10 +234,9 @@ export class SourceModal extends Modal {
       this.colorTouched = true;
     });
 
-    new Setting(contentEl).addButton((b) =>
-      b.setButtonText(t("modal.create")).setCta().onClick(() => this.submit())
-    );
+    footer(contentEl, this, t("modal.create"), () => this.submit());
     submitOnEnter(this, () => this.submit());
+    submitOnModEnter(this, () => this.submit());
   }
 
   private async submit() {
@@ -259,28 +285,29 @@ export class CaptureModal extends Modal {
   }
 
   onOpen() {
+    skin(this);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(t("modal.newCapture"));
 
-    new Setting(contentEl)
-      .setName(t("modal.captureText"))
-      .addTextArea((area) => {
-        area.setPlaceholder(t("modal.capturePh")).onChange((v) => (this.text = v));
-        area.inputEl.rows = 4;
-        area.inputEl.addClass("fel-textarea");
-        window.setTimeout(() => area.inputEl.focus(), 0);
-      });
-
-    new Setting(contentEl).setName(t("modal.subject")).addDropdown((d) => {
-      d.addOption("", t("modal.none"));
-      this.paths.forEach((p) => d.addOption(p, p));
-      d.setValue(this.category).onChange((v) => (this.category = v));
+    const text = field(contentEl, t("modal.captureText"));
+    const area = text.wrap.createEl("textarea", {
+      cls: "fel-textarea fel-write",
+      attr: { id: text.id, rows: "6", placeholder: t("modal.capturePh") },
     });
+    area.addEventListener("input", () => (this.text = area.value));
+    window.setTimeout(() => area.focus(), 0);
 
-    new Setting(contentEl).addButton((b) =>
-      b.setButtonText(t("modal.save")).setCta().onClick(() => this.submit())
-    );
+    const subject = field(contentEl, t("modal.subject"), "fel-field-inline");
+    const select = subject.wrap.createEl("select", { cls: "dropdown", attr: { id: subject.id } });
+    select.createEl("option", { value: "", text: t("modal.none") });
+    this.paths.forEach((p) => {
+      const opt = select.createEl("option", { value: p, text: p });
+      opt.selected = p === this.category;
+    });
+    select.addEventListener("change", () => (this.category = select.value));
+
+    footer(contentEl, this, t("modal.saveCapture"), () => this.submit());
     submitOnModEnter(this, () => this.submit());
   }
 
@@ -309,12 +336,12 @@ export interface ReadingNoteOptions {
   quote: string;
   /** Suggested location, e.g. from the user's current page. Editable. */
   locationHint: string;
-  leaf: import("obsidian").WorkspaceLeaf;
+  leaf: WorkspaceLeaf;
 }
 
 /**
  * Creates a reading note from a passage. The passage and the user's own
- * understanding are separate fields; nothing is written for the user.
+ * understanding are separate; nothing is written for the user.
  */
 export class ReadingNoteModal extends Modal {
   private sourcePath: string;
@@ -335,54 +362,62 @@ export class ReadingNoteModal extends Modal {
   }
 
   onOpen() {
+    skin(this, true);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(t("modal.readingNote"));
 
-    new Setting(contentEl).setName(t("modal.source")).addDropdown((d) => {
-      d.addOption("", t("modal.noSource"));
-      this.opts.sources.forEach((s) => d.addOption(s.path, s.title));
-      d.setValue(this.sourcePath).onChange((v) => (this.sourcePath = v));
+    // Where it comes from: two short fields side by side.
+    const meta = contentEl.createDiv({ cls: "fel-row2" });
+    const src = field(meta, t("modal.source"));
+    const select = src.wrap.createEl("select", { cls: "dropdown", attr: { id: src.id } });
+    select.createEl("option", { value: "", text: t("modal.noSource") });
+    this.opts.sources.forEach((s) => {
+      const opt = select.createEl("option", { value: s.path, text: s.title });
+      opt.selected = s.path === this.sourcePath;
     });
+    select.addEventListener("change", () => (this.sourcePath = select.value));
 
-    new Setting(contentEl)
-      .setName(t("modal.location"))
-      .addText((text) =>
-        text
-          .setPlaceholder(t("modal.locationPh"))
-          .setValue(this.location)
-          .onChange((v) => (this.location = v))
-      );
+    const loc = field(meta, t("modal.location"));
+    const locInput = loc.wrap.createEl("input", {
+      type: "text",
+      cls: "fel-input",
+      attr: { id: loc.id, placeholder: t("modal.locationPh") },
+    });
+    locInput.value = this.location;
+    locInput.addEventListener("input", () => (this.location = locInput.value));
 
+    // The passage, visibly apart from the user's own words.
     if (this.opts.quote) {
-      const block = contentEl.createDiv({ cls: "fel-quote-field" });
+      const block = contentEl.createDiv({ cls: "fel-field" });
       block.createDiv({ cls: "fel-field-label", text: t("modal.passage") });
-      block.createDiv({ cls: "fel-quote-preview", text: this.opts.quote });
-      block.createDiv({ cls: "setting-item-description", text: t("modal.passageDesc") });
+      block.createDiv({ cls: "fel-quote-preview", text: this.opts.quote, attr: { tabindex: "0" } });
     } else {
-      new Setting(contentEl).setName(t("modal.passage")).addTextArea((area) => {
-        area.onChange((v) => (this.quote = v));
-        area.inputEl.rows = 3;
-        area.inputEl.addClass("fel-textarea");
+      const pass = field(contentEl, t("modal.passage"));
+      const area = pass.wrap.createEl("textarea", {
+        cls: "fel-textarea",
+        attr: { id: pass.id, rows: "3" },
       });
+      area.addEventListener("input", () => (this.quote = area.value));
     }
 
-    const own = contentEl.createDiv({ cls: "fel-own-field" });
-    own.createDiv({ cls: "fel-field-label", text: t("modal.ownWords") });
-    const area = own.createEl("textarea", {
-      cls: "fel-textarea",
-      attr: { rows: "5", placeholder: t("modal.ownWordsPh"), "aria-label": t("modal.ownWords") },
+    const own = field(contentEl, t("modal.ownWords"), "fel-own-field");
+    const ownArea = own.wrap.createEl("textarea", {
+      cls: "fel-textarea fel-write",
+      attr: { id: own.id, rows: "9", placeholder: t("modal.ownWordsPh") },
     });
-    area.addEventListener("input", () => (this.own = area.value));
-    window.setTimeout(() => area.focus(), 0);
+    ownArea.addEventListener("input", () => (this.own = ownArea.value));
+    window.setTimeout(() => ownArea.focus(), 0);
 
-    new Setting(contentEl)
-      .setName(t("modal.noteTitleOpt"))
-      .addText((text) => text.onChange((v) => (this.title = v)));
+    const title = field(contentEl, t("modal.noteTitleOpt"));
+    const titleInput = title.wrap.createEl("input", {
+      type: "text",
+      cls: "fel-input",
+      attr: { id: title.id },
+    });
+    titleInput.addEventListener("input", () => (this.title = titleInput.value));
 
-    new Setting(contentEl).addButton((b) =>
-      b.setButtonText(t("modal.create")).setCta().onClick(() => this.submit())
-    );
+    footer(contentEl, this, t("modal.createReadingNote"), () => this.submit());
     submitOnModEnter(this, () => this.submit());
   }
 
@@ -426,16 +461,21 @@ export interface IdeaOptions {
   originContext: string;
   /** Source paths inherited from the origin. */
   sourcePaths: string[];
-  leaf: import("obsidian").WorkspaceLeaf;
+  leaf: WorkspaceLeaf;
 }
 
-/** An idea is its own note, linked to its origin and to any other notes. */
+/**
+ * Space to think. The idea is the title and the argument; the origin is a
+ * collapsed reminder, and linked notes are chips. Everything works by keyboard.
+ */
 export class IdeaModal extends Modal {
   private title = "";
   private argument = "";
+  private elaboration: Elaboration | "" = "";
   private related: TFile[] = [];
   private chipsEl: HTMLElement;
   private resultsEl: HTMLElement;
+  private searchEl: HTMLInputElement;
 
   constructor(
     app: App,
@@ -446,63 +486,110 @@ export class IdeaModal extends Modal {
   }
 
   onOpen() {
+    skin(this, true);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(this.opts.origin ? t("modal.newIdea") : t("modal.newIdeaStandalone"));
 
-    if (this.opts.origin) {
-      const origin = contentEl.createDiv({ cls: "fel-origin" });
-      origin.createDiv({ cls: "fel-field-label", text: t("modal.origin") });
-      origin.createDiv({ cls: "fel-origin-name", text: this.opts.origin.basename });
-      if (this.opts.originContext) {
-        origin.createDiv({ cls: "fel-quote-preview", text: this.opts.originContext });
-      }
-    }
+    if (this.opts.origin) this.renderOrigin(contentEl);
 
-    new Setting(contentEl)
-      .setName(t("modal.ideaTitle"))
-      .setDesc(t("modal.ideaTitleDesc"))
-      .addText((text) => {
-        text.onChange((v) => (this.title = v));
-        window.setTimeout(() => text.inputEl.focus(), 0);
-      });
+    // The idea itself: a full-width sentence, then room to argue it.
+    const idea = field(contentEl, t("modal.ideaQuestion"), "fel-field-idea");
+    const titleInput = idea.wrap.createEl("input", {
+      type: "text",
+      cls: "fel-title-input",
+      attr: {
+        id: idea.id,
+        placeholder: t("modal.ideaTitlePh"),
+        autocomplete: "off",
+        "aria-describedby": `${idea.id}-hint`,
+      },
+    });
+    idea.wrap.createDiv({ cls: "fel-hint", text: t("modal.ideaTitleDesc"), attr: { id: `${idea.id}-hint` } });
+    titleInput.addEventListener("input", () => (this.title = titleInput.value));
 
-    const arg = contentEl.createDiv({ cls: "fel-own-field" });
-    arg.createDiv({ cls: "fel-field-label", text: t("modal.argument") });
-    const area = arg.createEl("textarea", {
-      cls: "fel-textarea",
-      attr: { rows: "5", placeholder: t("modal.argumentPh"), "aria-label": t("modal.argument") },
+    const arg = field(contentEl, t("modal.argument"), "fel-field-write");
+    const area = arg.wrap.createEl("textarea", {
+      cls: "fel-textarea fel-write fel-write-lg",
+      attr: { id: arg.id, rows: "8", placeholder: t("modal.argumentPh") },
     });
     area.addEventListener("input", () => (this.argument = area.value));
 
-    this.renderLinkPicker(contentEl);
-
-    new Setting(contentEl).addButton((b) =>
-      b.setButtonText(t("modal.create")).setCta().onClick(() => this.submit())
-    );
-    submitOnEnter(this, () => this.submit());
-    submitOnModEnter(this, () => this.submit());
-  }
-
-  /** Type to search notes, click to link them. */
-  private renderLinkPicker(parent: HTMLElement) {
-    const wrap = parent.createDiv({ cls: "fel-linkpicker" });
-    wrap.createDiv({ cls: "fel-field-label", text: t("modal.linkNotes") });
-    const input = wrap.createEl("input", {
-      type: "search",
-      cls: "fel-pop-search",
-      placeholder: t("modal.linkNotesPh"),
-      attr: { "aria-label": t("modal.linkNotes") },
+    // Enter on the title moves on to the argument instead of saving.
+    titleInput.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter" && !evt.ctrlKey && !evt.metaKey) {
+        evt.preventDefault();
+        area.focus();
+      }
     });
-    this.resultsEl = wrap.createDiv({ cls: "fel-linkresults" });
-    this.chipsEl = wrap.createDiv({ cls: "fel-linkchips" });
 
-    input.addEventListener("input", () => this.renderResults(input.value));
+    this.renderLinkPicker(contentEl);
+    this.renderElaboration(contentEl);
+
+    footer(contentEl, this, t("modal.createIdea"), () => this.submit());
+    submitOnModEnter(this, () => this.submit());
+    window.setTimeout(() => titleInput.focus(), 0);
   }
 
-  private renderResults(query: string) {
+  /** A compact, collapsed reminder of where the idea comes from. */
+  private renderOrigin(parent: HTMLElement) {
+    const box = parent.createEl("details", { cls: "fel-origin" });
+    const summary = box.createEl("summary");
+    summary.createSpan({ cls: "fel-origin-label", text: `${t("modal.origin")}:` });
+    summary.createSpan({ cls: "fel-origin-name", text: this.opts.origin?.basename ?? "" });
+    if (this.opts.originContext) {
+      box.createDiv({ cls: "fel-quote-preview", text: this.opts.originContext });
+    }
+  }
+
+  private renderElaboration(parent: HTMLElement) {
+    const f = field(parent, t("modal.elabOptional"), "fel-field-inline");
+    const select = f.wrap.createEl("select", { cls: "dropdown", attr: { id: f.id } });
+    select.createEl("option", { value: "", text: t("modal.notSet") });
+    ELABORATIONS.forEach((e) => select.createEl("option", { value: e, text: t(`elab.${e}`) }));
+    select.addEventListener("change", () => (this.elaboration = select.value as Elaboration | ""));
+  }
+
+  /** Notes linked as chips; search by typing, add with Enter or by choosing a result. */
+  private renderLinkPicker(parent: HTMLElement) {
+    const f = field(parent, t("modal.linkNotes"), "fel-linkpicker");
+    this.chipsEl = f.wrap.createDiv({
+      cls: "fel-linkchips",
+      attr: { role: "list", "aria-label": t("modal.linkedNotes") },
+    });
+    this.searchEl = f.wrap.createEl("input", {
+      type: "text",
+      cls: "fel-input",
+      attr: {
+        id: f.id,
+        placeholder: t("modal.linkNotesPh"),
+        autocomplete: "off",
+        "aria-describedby": `${f.id}-hint`,
+      },
+    });
+    f.wrap.createDiv({ cls: "fel-hint", text: t("modal.linkHint"), attr: { id: `${f.id}-hint` } });
+    this.resultsEl = f.wrap.createDiv({ cls: "fel-linkresults", attr: { role: "listbox" } });
+
+    this.searchEl.addEventListener("input", () => this.renderResults());
+    this.searchEl.addEventListener("keydown", (evt) => {
+      const first = this.resultsEl.querySelector<HTMLElement>("button");
+      if (evt.key === "Enter" && !evt.ctrlKey && !evt.metaKey) {
+        evt.preventDefault();
+        first?.click();
+      } else if (evt.key === "ArrowDown" && first) {
+        evt.preventDefault();
+        first.focus();
+      } else if (evt.key === "Escape" && this.searchEl.value) {
+        evt.stopPropagation();
+        this.searchEl.value = "";
+        this.renderResults();
+      }
+    });
+  }
+
+  private renderResults() {
     this.resultsEl.empty();
-    const q = query.trim().toLowerCase();
+    const q = this.searchEl.value.trim().toLowerCase();
     if (!q) return;
     const taken = new Set([this.opts.origin?.path, ...this.related.map((f) => f.path)]);
     const matches = this.app.vault
@@ -510,29 +597,53 @@ export class IdeaModal extends Modal {
       .filter((f) => !taken.has(f.path) && f.basename.toLowerCase().includes(q))
       .sort((a, b) => b.stat.mtime - a.stat.mtime)
       .slice(0, 8);
+
+    const buttons: HTMLButtonElement[] = [];
     matches.forEach((file) => {
-      const row = this.resultsEl.createEl("button", { cls: "fel-linkresult", text: file.basename });
-      row.addEventListener("click", () => {
-        this.related.push(file);
-        this.renderChips();
-        this.renderResults(query);
+      const row = this.resultsEl.createEl("button", {
+        cls: "fel-linkresult",
+        text: file.basename,
+        attr: { type: "button", role: "option" },
+      });
+      row.addEventListener("click", () => this.addLink(file));
+      buttons.push(row);
+    });
+    // Arrow keys move through the results; Up from the first returns to the search box.
+    buttons.forEach((btn, i) => {
+      btn.addEventListener("keydown", (evt) => {
+        if (evt.key === "ArrowDown") {
+          evt.preventDefault();
+          buttons[Math.min(i + 1, buttons.length - 1)].focus();
+        } else if (evt.key === "ArrowUp") {
+          evt.preventDefault();
+          (i === 0 ? this.searchEl : buttons[i - 1]).focus();
+        }
       });
     });
+  }
+
+  private addLink(file: TFile) {
+    this.related.push(file);
+    this.renderChips();
+    this.searchEl.value = "";
+    this.renderResults();
+    this.searchEl.focus();
   }
 
   private renderChips() {
     this.chipsEl.empty();
     this.related.forEach((file) => {
-      const chip = this.chipsEl.createDiv({ cls: "fel-active-chip" });
+      const chip = this.chipsEl.createDiv({ cls: "fel-active-chip", attr: { role: "listitem" } });
       chip.createSpan({ text: file.basename });
       const x = chip.createEl("button", {
         cls: "fel-chip-x",
-        attr: { "aria-label": `${t("modal.remove")}: ${file.basename}` },
+        attr: { type: "button", "aria-label": `${t("modal.remove")}: ${file.basename}` },
       });
       x.setText("×");
       x.addEventListener("click", () => {
         this.related = this.related.filter((f) => f !== file);
         this.renderChips();
+        this.searchEl.focus();
       });
     });
   }
@@ -558,7 +669,8 @@ export class IdeaModal extends Modal {
       origin: this.opts.origin ? this.link(this.opts.origin) : undefined,
       sources,
       related: this.related.map((f) => this.link(f)),
-      elaboration: this.argument.trim() ? "developing" : "pending",
+      // Only what the user chose: an idea is not unfinished work by default.
+      elaboration: this.elaboration || undefined,
       connectionsHeading: t("f.conn"),
       originLabel: t("modal.origin"),
       date: new Date(),

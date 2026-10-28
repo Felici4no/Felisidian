@@ -92,6 +92,40 @@ export function presetFilters(view: ViewId): FilterState {
   return f;
 }
 
+function isSet(f: FilterState, key: FilterKey): boolean {
+  return key === "connections" ? f.connections !== null : (f[key] as unknown[]).length > 0;
+}
+
+/**
+ * Filters a view fixes by definition. They belong to the view itself ("Ideas"
+ * is the idea type), so the UI shows no button or chip for them.
+ */
+export function lockedKeys(view: ViewId): FilterKey[] {
+  const preset = presetFilters(view);
+  return KEYS.filter((k) => isSet(preset, k));
+}
+
+/** The filters with the view's own filters put back in place. */
+export function enforceView(f: FilterState, view: ViewId): FilterState {
+  const out = cloneFilters(f);
+  const preset = presetFilters(view);
+  lockedKeys(view).forEach((k) => {
+    (out as unknown as Record<string, unknown>)[k] = (preset as unknown as Record<string, unknown>)[k];
+  });
+  return cloneFilters(out);
+}
+
+/** Filters (and search) the user added on top of the view. */
+export function additionalCount(f: FilterState, view: ViewId): number {
+  const locked = lockedKeys(view);
+  const own = KEYS.filter((k) => !locked.includes(k) && isSet(f, k));
+  const values = own.reduce(
+    (n, k) => n + (k === "connections" ? 1 : (f[k] as unknown[]).length),
+    0
+  );
+  return values + (f.query.trim() ? 1 : 0);
+}
+
 export type SortKey = "manual" | "recent" | "title" | "year" | "progress";
 export type Tab = "items" | "notebooks" | "canvases";
 

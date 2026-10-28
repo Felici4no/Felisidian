@@ -1581,3 +1581,315 @@ body.fel-ide-code .cm-s-obsidian span.cm-inline-code {
 .fel-card.is-compact {
   min-height: 0;
 }
+
+/* ===== v3: writing windows with the library's look, readable metadata ===== */
+
+.modal.fel-modal {
+  --fel-serif: var(--fel-font, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif);
+  --fel-paper: #f7f0e6;
+  --fel-paper-2: #efe4d3;
+  --fel-paper-3: #e8dac5;
+  --fel-ink: #3b2f25;
+  --fel-ink-2: #65564a;
+  --fel-line: #e4d7c1;
+  --fel-field: color-mix(in srgb, #ffffff 55%, var(--fel-paper));
+  width: min(640px, 94vw);
+  padding: 26px 30px 20px;
+  border: 1px solid var(--fel-line);
+  border-radius: 22px;
+  background: var(--fel-paper);
+  color: var(--fel-ink);
+}
+
+.theme-dark .modal.fel-modal {
+  --fel-paper: #231e19;
+  --fel-paper-2: #332b23;
+  --fel-paper-3: #40362c;
+  --fel-ink: #efe4d3;
+  --fel-ink-2: #d2c6b4;
+  --fel-line: #4a3f34;
+  --fel-field: color-mix(in srgb, #000000 28%, var(--fel-paper));
+}
+
+.modal.fel-modal.is-wide {
+  width: min(780px, 94vw);
+}
+
+.fel-modal .modal-title {
+  margin-bottom: 14px;
+  font-family: var(--fel-serif);
+  font-size: 1.55em;
+  font-weight: 500;
+  color: var(--fel-ink);
+}
+
+.fel-modal .modal-close-button {
+  color: var(--fel-ink-2);
+}
+
+/* Settings-style rows (tag and source windows) */
+.fel-modal .setting-item {
+  border-top: 1px solid var(--fel-line);
+}
+
+.fel-modal .setting-item:first-child {
+  border-top: 0;
+}
+
+.fel-modal .setting-item-name {
+  color: var(--fel-ink);
+}
+
+.fel-modal .setting-item-description,
+.fel-modal .fel-hint {
+  color: var(--fel-ink-2);
+}
+
+/* Controls */
+.fel-modal input[type="text"],
+.fel-modal input[type="search"],
+.fel-modal textarea,
+.fel-modal select,
+.fel-modal .dropdown {
+  border: 1px solid var(--fel-line);
+  border-radius: 12px;
+  background: var(--fel-field);
+  color: var(--fel-ink);
+  box-shadow: none;
+}
+
+.fel-modal input:focus-visible,
+.fel-modal textarea:focus-visible,
+.fel-modal select:focus-visible,
+.fel-modal button:focus-visible,
+.fel-modal summary:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.fel-modal button.mod-cta {
+  padding: 8px 22px;
+  border-radius: 999px;
+  background: var(--fel-ink);
+  color: var(--fel-paper);
+  box-shadow: none;
+}
+
+.fel-modal button.mod-cta:hover {
+  background: color-mix(in srgb, var(--fel-ink) 85%, var(--fel-paper));
+}
+
+.fel-modal .fel-modal-cancel {
+  padding: 8px 18px;
+  border: 1px solid var(--fel-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fel-ink);
+  box-shadow: none;
+}
+
+.fel-modal .fel-modal-cancel:hover {
+  background: var(--fel-paper-2);
+}
+
+.fel-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--fel-line);
+}
+
+.fel-kbd-hint {
+  margin-right: auto;
+  color: var(--fel-ink-2);
+  font-size: 12.5px;
+}
+
+/* Fields */
+.fel-field {
+  margin: 0 0 16px;
+}
+
+.fel-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--fel-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fel-field-idea .fel-field-label {
+  font-family: var(--fel-serif);
+  font-size: 1.1em;
+  font-weight: 500;
+}
+
+.fel-hint {
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+
+.fel-input {
+  width: 100%;
+}
+
+.fel-title-input {
+  width: 100%;
+  padding: 10px 14px;
+  font-family: var(--fel-serif);
+  font-size: 1.5em;
+  line-height: 1.3;
+}
+
+.fel-write {
+  min-height: 150px;
+  padding: 14px 16px;
+  font-family: var(--fel-serif);
+  font-size: 1.1em;
+  line-height: 1.6;
+}
+
+.fel-write-lg {
+  min-height: 280px;
+}
+
+.fel-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 14px;
+}
+
+.fel-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fel-field-inline .fel-field-label {
+  margin: 0;
+}
+
+/* Origin: a compact, collapsed reminder. */
+details.fel-origin {
+  margin: 0 0 16px;
+  padding: 8px 14px;
+  border: 1px solid var(--fel-line);
+  border-radius: 14px;
+  background: var(--fel-paper-2);
+}
+
+.fel-origin summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.fel-origin-label {
+  color: var(--fel-ink-2);
+  font-size: 13px;
+}
+
+.fel-origin-name {
+  font-family: var(--fel-serif);
+  font-size: 1.05em;
+}
+
+.fel-modal .fel-quote-preview {
+  margin-top: 8px;
+  border-left-color: var(--fel-ink-2);
+  background: var(--fel-paper-2);
+  color: var(--fel-ink-2);
+}
+
+.fel-modal .fel-linkresult {
+  border-radius: 10px;
+  color: var(--fel-ink);
+}
+
+.fel-modal .fel-linkresult:hover,
+.fel-modal .fel-linkresult:focus-visible {
+  background: var(--fel-paper-2);
+}
+
+.fel-modal .fel-linkchips {
+  margin: 0 0 8px;
+}
+
+.fel-modal .fel-linkchips:empty {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .fel-row2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Readable metadata, also on dark ---- */
+
+.theme-dark .workspace-leaf-content[data-type="felisidian-library"],
+.theme-dark .workspace-leaf-content[data-type="felisidian-reader"],
+.theme-dark .fel-lib,
+.theme-dark .fel-reader {
+  --fel-ink-2: #d2c6b4;
+}
+
+.fel-card-authors {
+  color: color-mix(in srgb, var(--fel-ink) 90%, transparent);
+  font-size: 14px;
+}
+
+.fel-card-preview {
+  color: color-mix(in srgb, var(--fel-ink) 92%, transparent);
+  font-size: 14.5px;
+}
+
+.fel-count,
+.fel-pill,
+.fel-kind,
+.fel-location,
+.fel-date,
+.fel-pages,
+.fel-source-chip,
+.fel-develop-hint,
+.fel-notes {
+  font-size: 13px;
+}
+
+.fel-reader-authors {
+  color: color-mix(in srgb, var(--fel-ink) 88%, transparent);
+  font-size: 1.12em;
+}
+
+/* ---- v3 fixes: title size, window height, always-visible actions ---- */
+
+.fel-modal .fel-title-input {
+  padding: 10px 14px;
+  font-family: var(--fel-serif);
+  font-size: 1.5em;
+  line-height: 1.3;
+}
+
+.fel-modal .fel-write-lg {
+  min-height: 200px;
+}
+
+.modal.fel-modal {
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+/* Save and cancel stay in view however tall the window gets. */
+.fel-modal-foot {
+  position: sticky;
+  bottom: -20px;
+  z-index: 1;
+  margin-right: -4px;
+  margin-bottom: -20px;
+  padding-bottom: 20px;
+  background: var(--fel-paper);
+}

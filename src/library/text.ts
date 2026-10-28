@@ -135,7 +135,8 @@ export interface IdeaInput {
   origin?: string;
   sources: string[];
   related: string[];
-  elaboration: Elaboration;
+  /** Optional: an idea is not unfinished work by default. */
+  elaboration?: Elaboration;
   connectionsHeading: string;
   originLabel: string;
   date: Date;
@@ -147,7 +148,8 @@ export function buildIdeaNote(input: IdeaInput): string {
   if (input.sources.length) {
     fm.push("sources:", ...input.sources.map((s) => `  - ${q(`[[${s}]]`)}`));
   }
-  fm.push(`elaboration: ${input.elaboration}`, `created: ${isoDate(input.date)}`, "---", "");
+  if (input.elaboration) fm.push(`elaboration: ${input.elaboration}`);
+  fm.push(`created: ${isoDate(input.date)}`, "---", "");
 
   const out = [...fm, (input.argument ?? "").trim(), ""];
   const links: string[] = [];

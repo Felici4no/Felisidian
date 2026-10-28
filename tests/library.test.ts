@@ -1,8 +1,11 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
+  additionalCount,
   applicability,
   applyFilters,
+  enforceView,
+  lockedKeys,
   emptyFilters,
   facetCounts,
   hasAnyFilter,
@@ -21,6 +24,7 @@ import {
   splitNoteBody,
 } from "../src/library/text";
 import { buildTree, flattenTree, inCategory } from "../src/library/tree";
+import { kindLabelKey } from "../src/library/types";
 import type { LibraryItem } from "../src/library/types";
 
 function item(over: Partial<LibraryItem>): LibraryItem {
@@ -294,4 +298,48 @@ test("capture is short, dated and marked as undeveloped", () => {
 test("safeFileName removes characters Obsidian forbids", () => {
   assert.equal(safeFileName('a/b:c*d?"e'), "a-b-c-d--e");
   assert.equal(safeFileName("   "), "Untitled");
+});
+
+test("the type belongs to the view, not to the extra filters", () => {
+  assert.deepEqual(lockedKeys("ideas"), ["types"]);
+  assert.deepEqual(lockedKeys("captures"), ["types"]);
+  assert.deepEqual(lockedKeys("reading"), ["types", "statuses"]);
+  assert.deepEqual(lockedKeys("library"), []);
+  assert.deepEqual(lockedKeys("recent"), []);
+});
+
+test("a view's own filters are not counted as added filters", () => {
+  const ideas = presetFilters("ideas");
+  assert.equal(additionalCount(ideas, "ideas"), 0);
+  assert.equal(additionalCount({ ...ideas, elaborations: ["developing"] }, "ideas"), 1);
+  assert.equal(additionalCount({ ...ideas, query: "x" }, "ideas"), 1);
+  assert.equal(additionalCount({ ...emptyFilters(), types: ["idea"] }, "library"), 1);
+});
+
+test("enforceView restores the view's filters and keeps the rest", () => {
+  const messy = { ...emptyFilters(), types: ["source" as const], categories: ["Aprendizagem"] };
+  const fixed = enforceView(messy, "ideas");
+  assert.deepEqual(fixed.types, ["idea"]);
+  assert.deepEqual(fixed.categories, ["Aprendizagem"]);
+  assert.deepEqual(enforceView(emptyFilters(), "library"), emptyFilters());
+});
+
+test("cards show the format instead of repeating 'Source'", () => {
+  assert.equal(kindLabelKey({ kind: "source", format: "book" }), "format.book");
+  assert.equal(kindLabelKey({ kind: "source", format: "video" }), "format.video");
+  assert.equal(kindLabelKey({ kind: "source" }), "kind.source");
+  assert.equal(kindLabelKey({ kind: "idea" }), "kind.idea");
+});
+
+test("a new idea carries no elaboration unless the user sets one", () => {
+  const base = {
+    title: "Uma ideia",
+    sources: [],
+    related: [],
+    connectionsHeading: "Conexões",
+    originLabel: "Origem",
+    date: new Date("2026-10-28T10:00:00Z"),
+  };
+  assert.doesNotMatch(buildIdeaNote(base), /elaboration/);
+  assert.match(buildIdeaNote({ ...base, elaboration: "developing" }), /elaboration: developing/);
 });

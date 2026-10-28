@@ -277,7 +277,8 @@ export class ReaderView extends ItemView implements NavPage {
       "elaboration",
       t("f.elab"),
       ELABORATIONS.map((e) => [e, t(`elab.${e}`)]),
-      item.elaboration ?? "pending"
+      item.elaboration ?? (item.kind === "idea" ? "" : "pending"),
+      item.kind === "idea"
     );
   }
 
@@ -288,21 +289,28 @@ export class ReaderView extends ItemView implements NavPage {
     property: string,
     label: string,
     options: string[][],
-    value: string
+    value: string,
+    allowEmpty = false
   ) {
     const wrap = parent.createDiv({ cls: "fel-select-wrap" });
     const id = `fel-${property}-${Math.random().toString(36).slice(2, 7)}`;
     wrap.createEl("label", { text: label, attr: { for: id } });
     const select = wrap.createEl("select", { cls: "dropdown", attr: { id } });
-    if (!value) select.createEl("option", { value: "", text: "—" });
+    // An empty choice lets the user leave the state unset (ideas are not tasks).
+    if (!value || allowEmpty) {
+      const none = select.createEl("option", { value: "", text: t("modal.notSet") });
+      none.selected = !value;
+    }
     options.forEach(([v, text]) => {
       const opt = select.createEl("option", { value: v, text });
       opt.selected = v === value;
     });
     select.addEventListener("change", () => {
-      if (!select.value) return;
+      const chosen = select.value;
+      if (!chosen && !allowEmpty) return;
       void this.app.fileManager.processFrontMatter(file, (fm) => {
-        fm[property] = select.value;
+        if (chosen) fm[property] = chosen;
+        else delete fm[property];
       });
     });
   }

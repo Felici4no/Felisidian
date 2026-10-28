@@ -22,14 +22,15 @@ import {
   Tab,
   VIEW_IDS,
   ViewId,
-  activeCount,
+  additionalCount,
   applicability,
   applyFilters,
   cloneState,
   defaultLibraryState,
   emptyFilters,
+  enforceView,
   facetCounts,
-  hasAnyFilter,
+  lockedKeys,
   presetFilters,
   sortItems,
 } from "./filters";
@@ -219,6 +220,7 @@ export class LibraryView extends ItemView implements NavPage {
     this.descriptions = collectCategoryDescriptions(this.app);
     this.facetMemo.clear();
 
+    this.state.filters = enforceView(this.state.filters, this.state.view);
     const known = new Set(this.categoryPaths());
     this.state.filters.categories = this.state.filters.categories.filter((c) => known.has(c));
 
@@ -460,8 +462,14 @@ export class LibraryView extends ItemView implements NavPage {
 
     if (this.state.tab === "items") {
       const appl = applicability(this.contentItems(), f);
-      this.filterButton(left, "types", t("f.type"), () => [this.typeSection()]);
-      if (appl.status) this.filterButton(left, "statuses", t("f.status"), () => [this.statusSection()]);
+      // Filters a view defines (Ideas = the idea type) are part of the view, not extra filters.
+      const locked = lockedKeys(this.state.view);
+      if (!locked.includes("types")) {
+        this.filterButton(left, "types", t("f.type"), () => [this.typeSection()]);
+      }
+      if (appl.status && !locked.includes("statuses")) {
+        this.filterButton(left, "statuses", t("f.status"), () => [this.statusSection()]);
+      }
       if (appl.authors) this.filterButton(left, "authors", t("f.authors"), () => [this.authorsSection()]);
       const more = this.moreSections(appl);
       if (more.length) this.filterButton(left, "more", t("f.more"), () => this.moreSections(applicability(this.contentItems(), this.state.filters)));
@@ -702,6 +710,7 @@ export class LibraryView extends ItemView implements NavPage {
 
   private chipList(): { label: string; remove: () => void }[] {
     const f = this.state.filters;
+    const locked = lockedKeys(this.state.view);
     const chips: { label: string; remove: () => void }[] = [];
     const add = (group: string, value: string, remove: () => void) =>
       chips.push({ label: `${group}: ${value}`, remove });
@@ -709,8 +718,12 @@ export class LibraryView extends ItemView implements NavPage {
       this.state.filters[key] = (this.state.filters[key] as string[]).filter((x) => x !== v) as never;
     };
 
-    f.types.forEach((v) => add(t("f.type"), t(`kind.${v}`), dropFrom("types", v)));
-    f.statuses.forEach((v) => add(t("f.status"), t(`status.${v}`), dropFrom("statuses", v)));
+    if (!locked.includes("types")) {
+      f.types.forEach((v) => add(t("f.type"), t(`kind.${v}`), dropFrom("types", v)));
+    }
+    if (!locked.includes("statuses")) {
+      f.statuses.forEach((v) => add(t("f.status"), t(`status.${v}`), dropFrom("statuses", v)));
+    }
     f.authors.forEach((v) => add(t("f.authors"), v, dropFrom("authors", v)));
     f.categories.forEach((v) => add(t("f.subject"), v.split("/").pop() ?? v, dropFrom("categories", v)));
     f.formats.forEach((v) => add(t("f.format"), t(`format.${v}`), dropFrom("formats", v)));
@@ -725,7 +738,7 @@ export class LibraryView extends ItemView implements NavPage {
   }
 
   private clearFilters() {
-    this.state.filters = emptyFilters();
+    this.state.filters = enforceView(emptyFilters(), this.state.view);
     if (this.searchEl) this.searchEl.value = "";
     this.onFiltersChanged(true);
   }
@@ -769,7 +782,7 @@ export class LibraryView extends ItemView implements NavPage {
         this.onFiltersChanged(true);
       });
     });
-    if (activeCount(f) > 0 || f.query.trim()) {
+    if (additionalCount(f, this.state.view) > 0) {
       const clear = chipsEl.createEl("button", { cls: "fel-clear", text: t("f.clear") });
       clear.addEventListener("click", () => this.clearFilters());
     }
@@ -866,10 +879,10 @@ export class LibraryView extends ItemView implements NavPage {
       : this.contentItems().length > 0;
     if (!hasContent && this.state.tab === "items") return { text: t("lib.emptyLibrary"), clear: false };
 
-    const f = this.state.filters;
-    const preset = JSON.stringify({ ...presetFilters(this.state.view) });
-    const same = JSON.stringify({ ...f, query: "" }) === preset && !f.query.trim();
-    if (!hasAnyFilter(f) || same) return { text: t("lib.emptyView"), clear: false };
+    // Only filters the user added count: an empty Ideas view is just empty.
+    if (additionalCount(this.state.filters, this.state.view) === 0) {
+      return { text: t("lib.emptyView"), clear: false };
+    }
     return { text: t("lib.noResults"), clear: true };
   }
 

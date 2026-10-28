@@ -60,6 +60,16 @@ export interface LibraryItem {
   connections: number;
 }
 
+/**
+ * Translation key for a card's type label. A source with a known format shows
+ * the format ("Book") instead of repeating "Source · Book"; "Source" is kept
+ * for sources whose format is unknown.
+ */
+export function kindLabelKey(item: Pick<LibraryItem, "kind" | "format">): string {
+  if (item.kind === "source" && item.format) return `format.${item.format}`;
+  return `kind.${item.kind}`;
+}
+
 export interface CategoryNode {
   name: string;
   path: string;

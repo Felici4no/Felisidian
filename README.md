@@ -2,7 +2,13 @@
 
 A visual library for your Obsidian vault. Browse your notes as colored cards, grouped by category, with tags, authors, page counts and reading progress.
 
-> **Status:** early development (0.1.0). The library view is not implemented yet; the current build only ships the theming base (accent color, font size, corner radius).
+> **Status:** early development (0.1.0). The library view and the read-only reader work; see the roadmap in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+
+## Features
+
+- **Library view** with Items / Notebooks / Canvases tabs, breadcrumb navigation and category descriptions.
+- **Reading mode** (route: library > category > note): the page is read-only. Nothing changes unless you highlight, update the page counter or click *Edit note*.
+- **Highlighting**: select text and click *Highlight*. It is stored as standard `==text==` in the note. Click a highlight to remove it.
 
 ## Planned features
 

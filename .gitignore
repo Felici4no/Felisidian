@@ -8,3 +8,6 @@ Thumbs.db
 
 # third-party visual reference (not redistributed)
 docs/reference/
+
+# local test vault config
+dev-vault/.obsidian/
